@@ -1,0 +1,149 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  font-size: 14px;
+  background: #1a1a2e;
+  color: #eaeaea;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 12px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toolbar button {
+  padding: 8px 16px;
+  font-size: 14px;
+  border: 1px solid #4a4a6a;
+  background: #16213e;
+  color: #eaeaea;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.toolbar button:hover {
+  background: #0f3460;
+}
+
+.toolbar button:active {
+  background: #0a2647;
+}
+
+.panes {
+  flex: 1;
+  display: flex;
+  gap: 16px;
+  min-height: 0;
+}
+
+.pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pane label {
+  font-size: 12px;
+  color: #a0a0a0;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.pane textarea {
+  flex: 1;
+  min-height: 200px;
+  padding: 12px;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  background: #0f0f1a;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  color: #eaeaea;
+  resize: none;
+}
+
+.pane textarea:focus {
+  outline: none;
+  border-color: #4361ee;
+}
+
+.pane textarea:read-only {
+  cursor: default;
+}
+
+.stats {
+  font-size: 12px;
+  color: #a0a0a0;
+  padding: 8px 0;
+}
+
+.stats strong {
+  color: #eaeaea;
+}
+
+.detected-types {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.detected-types span {
+  padding: 2px 8px;
+  background: #2a2a4a;
+  border-radius: 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.preview {
+  margin-top: 8px;
+  padding: 12px;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  background: #0f0f1a;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  color: #a0a0a0;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.preview mark {
+  background: #4361ee44;
+  color: #7b9eff;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.preview-empty {
+  color: #4a4a6a;
+  font-style: italic;
+}
