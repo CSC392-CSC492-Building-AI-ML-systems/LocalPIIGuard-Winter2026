@@ -1,4 +1,4 @@
-import type { Match, ScanResult } from './types';
+﻿import type { Match, RawMatch, ScanResult } from './types';
 
 /**
  * Regex patterns for PII detection.
@@ -27,18 +27,36 @@ const PATTERNS: Array<{ type: string; regex: RegExp }> = [
   },
 ];
 
-interface RawMatch {
-  type: string;
-  start: number;
-  end: number;
-  value: string;
+function overlaps(a: RawMatch, b: RawMatch): boolean {
+  return !(a.end <= b.start || a.start >= b.end);
 }
 
 /**
- * Find all matches from all patterns, then resolve overlaps.
+ * Select non-overlapping matches.
  * Priority: longer matches first, then earlier start.
  */
-function collectMatches(text: string): RawMatch[] {
+function selectNonOverlapping(matches: RawMatch[]): RawMatch[] {
+  const ordered = [...matches].sort((a, b) => {
+    const lenA = a.end - a.start;
+    const lenB = b.end - b.start;
+    if (lenB !== lenA) return lenB - lenA;
+    return a.start - b.start;
+  });
+
+  const selected: RawMatch[] = [];
+  for (const m of ordered) {
+    const hasOverlap = selected.some((s) => overlaps(m, s));
+    if (!hasOverlap) selected.push(m);
+  }
+
+  selected.sort((a, b) => a.start - b.start);
+  return selected;
+}
+
+/**
+ * Collect regex matches and resolve internal overlaps.
+ */
+export function collectRegexMatches(text: string): RawMatch[] {
   const all: RawMatch[] = [];
 
   for (const { type, regex } of PATTERNS) {
@@ -50,31 +68,30 @@ function collectMatches(text: string): RawMatch[] {
         start: m.index,
         end: m.index + m[0].length,
         value: m[0],
+        source: 'regex',
       });
     }
   }
 
-  // Sort: longer first, then earlier start
-  all.sort((a, b) => {
-    const lenA = a.end - a.start;
-    const lenB = b.end - b.start;
-    if (lenB !== lenA) return lenB - lenA;
-    return a.start - b.start;
-  });
+  return selectNonOverlapping(all);
+}
 
-  // Filter overlapping: keep only non-overlapping matches
-  const selected: RawMatch[] = [];
-  for (const m of all) {
-    const overlaps = selected.some(
-      (s) => !(m.end <= s.start || m.start >= s.end)
-    );
-    if (!overlaps) selected.push(m);
-  }
+/**
+ * Merge base (regex) matches with extra (NER) matches.
+ * Extra matches that overlap base are discarded.
+ */
+export function mergeMatches(
+  baseMatches: RawMatch[],
+  extraMatches: RawMatch[]
+): RawMatch[] {
+  const base = selectNonOverlapping(baseMatches);
+  const extra = selectNonOverlapping(extraMatches).filter(
+    (m) => !base.some((b) => overlaps(m, b))
+  );
 
-  // Sort by start for stable ordering
-  selected.sort((a, b) => a.start - b.start);
-
-  return selected;
+  const merged = [...base, ...extra];
+  merged.sort((a, b) => a.start - b.start);
+  return merged;
 }
 
 /**
@@ -97,10 +114,9 @@ function buildPlaceholderMap(matches: RawMatch[]): Map<string, string> {
 }
 
 /**
- * Scan text for PII and return redacted text + matches.
+ * Build redacted text and matches from a RawMatch list.
  */
-export function scanText(text: string): ScanResult {
-  const rawMatches = collectMatches(text);
+export function buildRedaction(text: string, rawMatches: RawMatch[]): ScanResult {
   const placeholderMap = buildPlaceholderMap(rawMatches);
 
   const matches: Match[] = rawMatches.map((m) => ({
@@ -126,4 +142,12 @@ export function scanText(text: string): ScanResult {
   }
 
   return { redactedText, matches };
+}
+
+/**
+ * Scan text for PII using regex rules only.
+ */
+export function scanText(text: string): ScanResult {
+  const rawMatches = collectRegexMatches(text);
+  return buildRedaction(text, rawMatches);
 }
