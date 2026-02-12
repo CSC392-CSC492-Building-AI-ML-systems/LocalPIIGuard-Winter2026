@@ -1,5 +1,6 @@
 ﻿import { useState, useCallback, useEffect } from 'react';
 
+
 interface Match {
   type: string;
   start: number;
@@ -12,10 +13,7 @@ interface ScanResult {
   matches: Match[];
 }
 
-interface LayerState {
-  regex: boolean;
-  ner: boolean;
-}
+type LayerState = Record<string, boolean>;
 
 declare global {
   interface Window {
@@ -62,10 +60,7 @@ function App() {
   const [redacted, setRedacted] = useState('');
   const [matches, setMatches] = useState<Match[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [layerState, setLayerState] = useState<LayerState>({
-    regex: true,
-    ner: true,
-  });
+  const [layerState, setLayerState] = useState<LayerState>({});
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;
@@ -132,7 +127,9 @@ function App() {
 
   const detectedTypes = [...new Set(matches.map((m) => m.type))];
   const previewNodes = buildHighlightedPreview(input, matches);
-  const layerStatus = `Regex: ${layerState.regex ? 'On' : 'Off'} · NER: ${layerState.ner ? 'On' : 'Off'}`;
+  const layerStatus = Object.entries(layerState)
+    .map(([name, enabled]) => `${name}: ${enabled ? "On" : "Off"}`)
+    .join(" · ");
 
   return (
     <div className="app">

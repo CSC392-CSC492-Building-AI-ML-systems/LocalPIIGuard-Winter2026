@@ -12,10 +12,7 @@ export interface ScanResult {
   matches: Match[];
 }
 
-export interface LayerState {
-  regex: boolean;
-  ner: boolean;
-}
+type LayerState = Record<string, boolean>;
 
 contextBridge.exposeInMainWorld('pii', {
   scanText: (text: string) => ipcRenderer.invoke('pii:scan', text),
