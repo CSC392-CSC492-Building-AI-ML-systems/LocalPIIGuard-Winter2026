@@ -1,14 +1,20 @@
 ﻿import { app, BrowserWindow, ipcMain, clipboard, Menu } from 'electron';
 import path from 'path';
-import { buildRedaction, collectRegexMatches, mergeMatches } from '../shared/scanner';
-import { getSpacyMatches } from './ner';
+import { buildRedaction, mergeMatches } from '../shared/scanner';
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
-const layerState = {
-  regex: true,
-  ner: true,
-};
+import { RegexDetector } from '../shared/regex-detector'
+import { NerDetector } from '../shared/ner-detector';
+
+const piiDetector = [
+  new RegexDetector(),
+  new NerDetector()
+]
+
+const layerState = Object.fromEntries(
+  piiDetector.map(detector => [detector.getName(), true])
+);
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -21,26 +27,15 @@ function buildMenu(): void {
   const menu = Menu.buildFromTemplate([
     {
       label: 'PII Layers',
-      submenu: [
-        {
-          label: 'Regex',
-          type: 'checkbox',
-          checked: layerState.regex,
-          click: (item) => {
-            layerState.regex = item.checked;
-            notifyLayerState();
-          },
+      submenu: piiDetector.map(detector => ({
+        label: detector.getName(), // Capitalize
+        type: 'checkbox',
+        checked: layerState[detector.getName()],
+        click: (item) => {
+          layerState[detector.getName()] = item.checked;
+          notifyLayerState();
         },
-        {
-          label: 'NER (spaCy)',
-          type: 'checkbox',
-          checked: layerState.ner,
-          click: (item) => {
-            layerState.ner = item.checked;
-            notifyLayerState();
-          },
-        },
-      ],
+      })),
     },
     { role: 'windowMenu' },
     { role: 'help' },
@@ -86,22 +81,20 @@ app.on('window-all-closed', () => {
 // IPC handlers
 ipcMain.handle('pii:scan', async (_event, text: string) => {
   const input = text ?? '';
-  const regexMatches = layerState.regex ? collectRegexMatches(input) : [];
+  // Collect all matches from active detectors
+  const allMatches = await Promise.all(
+    piiDetector
+      .filter(detector => detector) // filter out undefined if needed
+      .map(detector => detector.collectMatches(input))
+  );
 
-  if (!layerState.ner) {
-    return buildRedaction(input, regexMatches);
-  }
+  // Merge all matches starting from regexMatches
+  const merged = allMatches.reduce(
+    (acc, matches) => mergeMatches(acc, matches ?? []),
+    []
+  );
 
-  try {
-    const nerMatches = await getSpacyMatches(input);
-    const merged = mergeMatches(regexMatches, nerMatches);
-    return buildRedaction(input, merged);
-  } catch (error) {
-    if (isDev) {
-      console.warn('spaCy NER failed, falling back to regex-only scan.', error);
-    }
-    return buildRedaction(input, regexMatches);
-  }
+  return buildRedaction(input, merged);
 });
 
 ipcMain.handle('pii:copy', (_event, text: string) => {
