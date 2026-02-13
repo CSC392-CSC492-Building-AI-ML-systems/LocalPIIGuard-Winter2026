@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+﻿import { useState, useCallback, useEffect } from 'react';
 
 interface Match {
   type: string;
@@ -12,11 +12,18 @@ interface ScanResult {
   matches: Match[];
 }
 
+interface LayerState {
+  regex: boolean;
+  ner: boolean;
+}
+
 declare global {
   interface Window {
     pii?: {
       scanText: (text: string) => Promise<ScanResult>;
       copyToClipboard: (text: string) => Promise<void>;
+      getLayerState: () => Promise<LayerState>;
+      onLayerState: (handler: (state: LayerState) => void) => () => void;
     };
   }
 }
@@ -55,6 +62,34 @@ function App() {
   const [redacted, setRedacted] = useState('');
   const [matches, setMatches] = useState<Match[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [layerState, setLayerState] = useState<LayerState>({
+    regex: true,
+    ner: true,
+  });
+
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+
+    const init = async () => {
+      if (!window.pii?.getLayerState || !window.pii?.onLayerState) return;
+      try {
+        const current = await window.pii.getLayerState();
+        setLayerState(current);
+      } catch {
+        return;
+      }
+
+      cleanup = window.pii.onLayerState((state) => {
+        setLayerState(state);
+      });
+    };
+
+    init();
+
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, []);
 
   const handleScan = useCallback(async () => {
     setError(null);
@@ -97,6 +132,7 @@ function App() {
 
   const detectedTypes = [...new Set(matches.map((m) => m.type))];
   const previewNodes = buildHighlightedPreview(input, matches);
+  const layerStatus = `Regex: ${layerState.regex ? 'On' : 'Off'} · NER: ${layerState.ner ? 'On' : 'Off'}`;
 
   return (
     <div className="app">
@@ -116,9 +152,10 @@ function App() {
         <strong>{matches.length}</strong> match{matches.length !== 1 ? 'es' : ''} found
         {detectedTypes.length > 0 && (
           <div className="detected-types">
-            Detected: {detectedTypes.map((t) => <span key={t}>{t}</span>)}
+            Detected: {detectedTypes.map((t) => <span key={t}>{t}</span>) }
           </div>
         )}
+        <div style={{ fontSize: 12, color: '#a0a0a0', marginTop: 6 }}>{layerStatus}</div>
       </div>
 
       {error && (

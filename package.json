@@ -46,7 +46,8 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*"
+      "dist-electron/**/*",
+      "scripts/**/*"
     ],
     "mac": {
       "target": "dmg",
