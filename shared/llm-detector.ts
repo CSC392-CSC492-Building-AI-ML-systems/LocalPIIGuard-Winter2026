@@ -3,7 +3,7 @@ import { PiiType } from './types';
 import { selectNonOverlapping } from './helper';
 
 const OLLAMA_BASE = process.env.PII_OLLAMA_BASE ?? 'http://localhost:11434';
-const OLLAMA_MODEL = process.env.PII_OLLAMA_MODEL ?? 'mistral:7b-instruct-v0.3-q4_K_M';
+const OLLAMA_MODEL = process.env.PII_OLLAMA_MODEL ?? 'llama3.2:3b';
 const OLLAMA_TIMEOUT_MS = Number(process.env.PII_OLLAMA_TIMEOUT_MS) || 60000;
 
 const DEBUG = /^1|true|yes$/i.test(process.env.PII_LLM_DEBUG ?? '') || /^1|true|yes$/i.test(process.env.PII_DEBUG ?? '');
@@ -14,7 +14,7 @@ function debug(...args: unknown[]): void {
   }
 }
 
-type OllamaPiiItem = { type: string; value: string; reason?: string };
+type OllamaPiiItem = { value: string; start: number; end: number; label: string };
 
 const VALID_PII_TYPES = new Set<string>([
   PiiType.EMAIL,
@@ -22,26 +22,42 @@ const VALID_PII_TYPES = new Set<string>([
   PiiType.IP,
   PiiType.CARD,
   PiiType.NAME,
+  PiiType.FIRSTNAME,
+  PiiType.LASTNAME,
   PiiType.LOCATION,
   PiiType.ORG,
   PiiType.DATE,
+  PiiType.USERNAME,
+  PiiType.TIME,
+  PiiType.IDCARD,
+  PiiType.COUNTRY,
+  PiiType.BUILDING,
+  PiiType.STREET,
+  PiiType.CITY,
+  PiiType.STATE,
+  PiiType.POSTCODE,
+  PiiType.PASS,
+  PiiType.SOCIALNUMBER,
 ]);
 
-const PII_TYPE_ENUM = ['EMAIL', 'PHONE', 'IP', 'CARD', 'NAME', 'LOCATION', 'ORG', 'DATE'];
+const PII_TYPE_ENUM = [
+  'EMAIL', 'PHONE', 'IP', 'CARD', 'NAME', 'FIRSTNAME', 'LASTNAME',
+  'LOCATION', 'ORG', 'DATE', 'USERNAME', 'TIME', 'IDCARD', 'COUNTRY',
+  'BUILDING', 'STREET', 'CITY', 'STATE', 'POSTCODE', 'PASS', 'SOCIALNUMBER',
+];
 
-/** JSON schema for chat format: root object with items array. Ensures model returns array, not a single object. */
+/** JSON schema for chat format: root object with items array. */
 function getResponseSchema(): Record<string, unknown> {
   const itemSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
-      type: { type: 'string', enum: PII_TYPE_ENUM },
       value: { type: 'string' },
+      start: { type: 'integer' },
+      end: { type: 'integer' },
+      label: { type: 'string', enum: PII_TYPE_ENUM },
     },
-    required: ['type', 'value'],
+    required: ['value', 'start', 'end', 'label'],
   };
-  if (DEBUG) {
-    (itemSchema.properties as Record<string, unknown>)['reason'] = { type: 'string', description: 'Brief reason for this detection (debug only)' };
-  }
   return {
     type: 'object',
     properties: {
@@ -55,15 +71,21 @@ function getResponseSchema(): Record<string, unknown> {
   };
 }
 
+/**
+ * Map a label string to a PiiType. Strips trailing digits so that labels
+ * like LASTNAME1 or LASTNAME2 resolve to PiiType.LASTNAME.
+ */
 function mapType(raw: string): PiiType | null {
   const upper = raw?.toUpperCase?.()?.trim?.();
-  if (upper && VALID_PII_TYPES.has(upper)) return upper as PiiType;
+  if (!upper) return null;
+  if (VALID_PII_TYPES.has(upper)) return upper as PiiType;
+  const base = upper.replace(/\d+$/, '');
+  if (base && VALID_PII_TYPES.has(base)) return base as PiiType;
   return null;
 }
 
 /**
  * Find all non-overlapping occurrences of `needle` in `text`, returning [start, end] pairs.
- * The returned span uses the exact substring from text (so value can differ from needle).
  */
 function findOccurrences(
   text: string,
@@ -116,38 +138,43 @@ function findOccurrencesNormalized(
 }
 
 /**
- * Fallback: extract one or more {"type":"...","value":"..."} from text via regex.
- * Handles pretty-printed or truncated JSON when JSON.parse fails or returns no items.
+ * Fallback: extract { value, start, end, label } objects from text via regex
+ * when JSON.parse fails or returns no items.
  */
 function parseJsonArrayFallback(response: string): OllamaPiiItem[] {
   const items: OllamaPiiItem[] = [];
-  const re = /"type"\s*:\s*"([^"]*)"\s*,\s*"value"\s*:\s*"([^"]*)"|"value"\s*:\s*"([^"]*)"\s*,\s*"type"\s*:\s*"([^"]*)"/g;
+  const re = /"value"\s*:\s*"([^"]*)"\s*,\s*"start"\s*:\s*(\d+)\s*,\s*"end"\s*:\s*(\d+)\s*,\s*"label"\s*:\s*"([^"]*)"/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(response)) !== null) {
-    const type = m[1] ?? m[4] ?? '';
-    const value = m[2] ?? m[3] ?? '';
-    if (type && value) items.push({ type, value });
+    const value = m[1] ?? '';
+    const start = parseInt(m[2] ?? '', 10);
+    const end = parseInt(m[3] ?? '', 10);
+    const label = m[4] ?? '';
+    if (value && label && !isNaN(start) && !isNaN(end) && end > start) {
+      items.push({ value, start, end, label });
+    }
   }
   return items;
 }
 
 /**
- * Normalize item to OllamaPiiItem (optional reason in debug).
+ * Normalize a parsed object to OllamaPiiItem.
  */
 function normalizeItem(obj: unknown): OllamaPiiItem | null {
   if (obj == null || typeof obj !== 'object') return null;
   const o = obj as Record<string, unknown>;
-  const type = typeof o.type === 'string' ? o.type : '';
   const value = typeof o.value === 'string' ? o.value : '';
-  if (!type || !value) return null;
-  const item: OllamaPiiItem = { type, value };
-  if (DEBUG && typeof o.reason === 'string') item.reason = o.reason;
-  return item;
+  const start = typeof o.start === 'number' ? Math.round(o.start) : -1;
+  const end = typeof o.end === 'number' ? Math.round(o.end) : -1;
+  const label = typeof o.label === 'string' ? o.label : '';
+  if (!value || !label || start < 0 || end <= start) return null;
+  return { value, start, end, label };
 }
 
 /**
- * Extract items from the model response. Expects { items: [...] } from schema, or raw array.
- * May be wrapped in markdown code block. Falls back to regex if parse yields no items.
+ * Extract items from the model response. Expects { items: [...] } from schema,
+ * or raw array. May be wrapped in markdown code block. Falls back to regex
+ * if parse yields no items.
  */
 function parseJsonArray(response: string): OllamaPiiItem[] {
   if (typeof response !== 'string') return [];
@@ -179,6 +206,63 @@ function parseJsonArray(response: string): OllamaPiiItem[] {
   return arr;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Few-shot examples                                                  */
+/* ------------------------------------------------------------------ */
+
+const FEW_SHOT_1_USER = `Subject: Group Messaging for Admissions Process
+Good morning, everyone,
+I hope this message finds you well. As we continue our admissions processes, I would like to update you on the latest developments and key information. Please find below the timeline for our upcoming meetings:
+
+wynqvrh053 - Meeting at 10:20am
+luka.burg - Meeting at 21
+qahl.wittauer - Meeting at quarter past 13
+gholamhossein.ruschke - Meeting at 9:47 PM
+pdmjrsyoz1460`;
+
+const FEW_SHOT_1_ASSISTANT = JSON.stringify({
+  items: [
+    { value: 'wynqvrh053', start: 287, end: 297, label: 'USERNAME' },
+    { value: '10:20am', start: 311, end: 318, label: 'TIME' },
+    { value: 'luka.burg', start: 319, end: 328, label: 'USERNAME' },
+    { value: '21', start: 342, end: 344, label: 'TIME' },
+    { value: 'qahl.wittauer', start: 345, end: 358, label: 'USERNAME' },
+    { value: 'quarter past 13', start: 372, end: 387, label: 'TIME' },
+    { value: 'gholamhossein.ruschke', start: 388, end: 409, label: 'USERNAME' },
+    { value: '9:47 PM', start: 423, end: 430, label: 'TIME' },
+    { value: 'pdmjrsyoz1460', start: 431, end: 444, label: 'USERNAME' },
+  ],
+});
+
+const FEW_SHOT_2_USER = 'Card: KB90324ER\n Country: GB\n Building: 163\n Street: Conygre Grove\n City: Bristol\n State: ENG\n Postcode: BS34 7HU, BS34 7HZ\n Password: q4R\\n\n2. Applicant: Baasgaran Palmoso\n Email: blerenbaasgara@gmail.com\n Social Number: 107-393-9036\n ID Card: SC78428CU\n Country: United Kingdom\n Building: 646\n Street: School Lane\n City: Altrincham\n State: ENG\n Postcode: WA14 5R';
+
+const FEW_SHOT_2_ASSISTANT = JSON.stringify({
+  items: [
+    { value: 'KB90324ER', start: 6, end: 15, label: 'IDCARD' },
+    { value: 'GB', start: 29, end: 31, label: 'COUNTRY' },
+    { value: '163', start: 46, end: 49, label: 'BUILDING' },
+    { value: 'Conygre Grove', start: 62, end: 75, label: 'STREET' },
+    { value: 'Bristol', start: 86, end: 93, label: 'CITY' },
+    { value: 'ENG', start: 105, end: 108, label: 'STATE' },
+    { value: 'BS34 7HU, BS34 7HZ', start: 123, end: 141, label: 'POSTCODE' },
+    { value: 'q4R\\\\', start: 156, end: 161, label: 'PASS' },
+    { value: 'Baasgaran', start: 179, end: 188, label: 'LASTNAME' },
+    { value: 'Palmoso', start: 189, end: 196, label: 'LASTNAME' },
+    { value: 'blerenbaasgara@gmail.com', start: 208, end: 232, label: 'EMAIL' },
+    { value: '107-393-9036', start: 252, end: 264, label: 'SOCIALNUMBER' },
+    { value: 'SC78428CU', start: 278, end: 287, label: 'IDCARD' },
+    { value: 'United Kingdom', start: 301, end: 315, label: 'COUNTRY' },
+    { value: '646', start: 330, end: 333, label: 'BUILDING' },
+    { value: 'School Lane', start: 346, end: 357, label: 'STREET' },
+    { value: 'Altrincham', start: 368, end: 378, label: 'CITY' },
+    { value: 'ENG', start: 390, end: 393, label: 'STATE' },
+  ],
+});
+
+/* ------------------------------------------------------------------ */
+/*  Detector class                                                     */
+/* ------------------------------------------------------------------ */
+
 export class LlamaDetector implements PIIDetector {
   async collectMatches(text: string): Promise<RawMatch[]> {
     if (!text.trim()) {
@@ -190,21 +274,29 @@ export class LlamaDetector implements PIIDetector {
       return [];
     }
 
-    const systemPrompt = `You are a PII (personally identifiable information) detector. Your task is to list every PII span in the user's text.
+    const systemPrompt = `You are a PII scrubbing assistant that expertly identifies and locates private data in text.
 
-Coverage: You MUST find all instances of PII in the text. Output an empty list only if there is absolutely no PII present. Do not guess or infer. If unsure whether something is PII, do not include it.
+For each piece of PII found, return a JSON object with an "items" array. Each item must have:
+- "value": the exact substring from the text (character-for-character)
+- "start": the starting character offset (0-based)
+- "end": the ending character offset (exclusive)
+- "label": the PII category label
+
+Supported labels: ${PII_TYPE_ENUM.join(', ')}
 
 Rules:
-- Only mark PII that is explicitly present in the text. Use the exact substring (character-for-character).
-- Never infer missing parts (e.g. do not add "Toronto" if the text only says "I live downtown").
-- "type" must be one of: EMAIL, PHONE, IP, CARD, NAME, LOCATION, ORG, DATE
-- "value" must be the exact substring that appears in the text.
-${DEBUG ? '- "reason": optional brief explanation for this detection (one line).' : ''}
-
-Respond with a single JSON object of the form: { "items": [ { "type": "...", "value": "..."${DEBUG ? ', "reason": "..."' : ''} }, ... ] }. Use "items": [] only when there are no PII spans at all.`;
+- Only mark PII that is explicitly present in the text. Use the exact substring.
+- "start" and "end" must be accurate character offsets into the original text.
+- Never infer missing parts (e.g. do not add a city if the text only says "I live downtown").
+- If unsure whether something is PII, do not include it.
+- Return {"items": []} only if there is absolutely no PII present.`;
 
     const messages: Array<{ role: string; content: string }> = [
       { role: 'system', content: systemPrompt },
+      { role: 'user', content: FEW_SHOT_1_USER },
+      { role: 'assistant', content: FEW_SHOT_1_ASSISTANT },
+      { role: 'user', content: FEW_SHOT_2_USER },
+      { role: 'assistant', content: FEW_SHOT_2_ASSISTANT },
       { role: 'user', content: text },
     ];
 
@@ -253,14 +345,33 @@ Respond with a single JSON object of the form: { "items": [ { "type": "...", "va
       }
 
       const rawMatches: RawMatch[] = [];
-      const typesWithNormalizedMatching = new Set<PiiType>([PiiType.PHONE, PiiType.CARD]);
+      const typesWithNormalizedMatching = new Set<PiiType>([PiiType.PHONE, PiiType.CARD, PiiType.SOCIALNUMBER]);
 
       for (const item of items) {
-        if (DEBUG && item.reason) debug('item reason:', item.type, item.value, item.reason);
-        const type = mapType(item.type);
+        const type = mapType(item.label);
         if (!type) continue;
         const value = String(item.value).trim();
         if (!value) continue;
+        const label = item.label.toUpperCase().trim();
+
+        // First, validate LLM-provided positions
+        if (item.start >= 0 && item.end > item.start && item.end <= text.length) {
+          const textSlice = text.slice(item.start, item.end);
+          if (textSlice === value) {
+            rawMatches.push({
+              type,
+              start: item.start,
+              end: item.end,
+              value,
+              source: this.getName(),
+              label,
+            });
+            continue;
+          }
+          debug('position mismatch for', label, ':', JSON.stringify(value), 'vs', JSON.stringify(textSlice));
+        }
+
+        // Fallback: find occurrences by text search
         let occurrences = findOccurrences(text, value);
         if (
           occurrences.length === 0 &&
@@ -276,6 +387,7 @@ Respond with a single JSON object of the form: { "items": [ { "type": "...", "va
             end,
             value: spanValue,
             source: this.getName(),
+            label,
           });
         }
       }

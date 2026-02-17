@@ -1,12 +1,25 @@
-﻿export enum PiiType {
+export enum PiiType {
   EMAIL = "EMAIL",
   PHONE = "PHONE",
   IP = "IP",
   CARD = "CARD",
   NAME = "NAME",
+  FIRSTNAME = "FIRSTNAME",
+  LASTNAME = "LASTNAME",
   LOCATION = "LOCATION",
   ORG = "ORG",
-  DATE = "DATE"
+  DATE = "DATE",
+  USERNAME = "USERNAME",
+  TIME = "TIME",
+  IDCARD = "IDCARD",
+  COUNTRY = "COUNTRY",
+  BUILDING = "BUILDING",
+  STREET = "STREET",
+  CITY = "CITY",
+  STATE = "STATE",
+  POSTCODE = "POSTCODE",
+  PASS = "PASS",
+  SOCIALNUMBER = "SOCIALNUMBER",
 }
 
 export interface Match {
@@ -22,6 +35,7 @@ export interface RawMatch {
   end: number;
   value: string;
   source: string;
+  label?: string;
 }
 
 export interface ScanResult {

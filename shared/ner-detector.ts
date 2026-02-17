@@ -30,7 +30,7 @@ const LABEL_MAP: Record<string, PiiType> = {
   FAC: PiiType.LOCATION,
   ORG: PiiType.ORG,
   DATE: PiiType.DATE,
-  TIME: PiiType.DATE,
+  TIME: PiiType.TIME,
 };
 
 function mapLabel(label: string): PiiType | null {

@@ -1,4 +1,4 @@
-﻿import type { Match, RawMatch, ScanResult } from './types';
+import type { Match, RawMatch, ScanResult } from './types';
 import { selectNonOverlapping, overlaps } from './helper';
 
 /**
@@ -21,17 +21,17 @@ export function mergeMatches(
 
 /**
  * Build placeholder map: same value => same placeholder within a scan.
+ * Uses the original label from the detector if available, otherwise falls
+ * back to the PiiType.  No numeric suffix is appended.
  */
 function buildPlaceholderMap(matches: RawMatch[]): Map<string, string> {
   const valueToPlaceholder = new Map<string, string>();
-  const counters: Record<string, number> = {};
 
   for (const m of matches) {
     const key = `${m.type}:${m.value}`;
     if (!valueToPlaceholder.has(key)) {
-      const n = (counters[m.type] ?? 0) + 1;
-      counters[m.type] = n;
-      valueToPlaceholder.set(key, `[${m.type}_${n}]`);
+      const tag = m.label ?? m.type;
+      valueToPlaceholder.set(key, `[${tag}]`);
     }
   }
 
