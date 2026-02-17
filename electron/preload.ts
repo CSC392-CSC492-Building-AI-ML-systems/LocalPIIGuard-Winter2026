@@ -1,4 +1,4 @@
-﻿import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer } from 'electron';
 
 export interface Match {
   type: string;
@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('pii', {
   scanText: (text: string) => ipcRenderer.invoke('pii:scan', text),
   copyToClipboard: (text: string) => ipcRenderer.invoke('pii:copy', text),
   getLayerState: () => ipcRenderer.invoke('pii:get-layers') as Promise<LayerState>,
+  setLayer: (name: string, enabled: boolean) => ipcRenderer.invoke('pii:set-layer', name, enabled),
   onLayerState: (handler: (state: LayerState) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, state: LayerState) => {
       handler(state);

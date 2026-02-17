@@ -1,4 +1,4 @@
-﻿## Installation
+## Installation
 
 ### Prerequisites
 
@@ -17,6 +17,12 @@ Install this for the spaCy NER layer:
 python -m pip install -r scripts/requirements-spacy.txt
 python -m spacy download en_core_web_sm
 ```
+
+Optional — for the **LLM** detector layer:
+
+1. Install [Ollama](https://ollama.com) and run: `ollama pull mistral:7b-instruct-v0.3-q4_K_M` (or another model; set `PII_OLLAMA_MODEL` to match).
+2. Keep Ollama running (it serves `http://localhost:11434`). The app will call it when the "LLM" PII layer is enabled in the UI.
+3. To disable the LLM layer without uninstalling: set env `PII_LLM_DISABLE=1`. To use another model: `PII_OLLAMA_MODEL=your-model`. Debug logs: `PII_DEBUG=1` (scan/merge pipeline + LLM detector), or `PII_LLM_DEBUG=1` (LLM detector only).
 
 ## Running prototype
 

@@ -1,4 +1,4 @@
-﻿import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
 
 interface Match {
@@ -16,11 +16,12 @@ interface ScanResult {
 type LayerState = Record<string, boolean>;
 
 declare global {
-  interface Window {
+    interface Window {
     pii?: {
       scanText: (text: string) => Promise<ScanResult>;
       copyToClipboard: (text: string) => Promise<void>;
       getLayerState: () => Promise<LayerState>;
+      setLayer: (name: string, enabled: boolean) => Promise<void>;
       onLayerState: (handler: (state: LayerState) => void) => () => void;
     };
   }
@@ -61,6 +62,7 @@ function App() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [layerState, setLayerState] = useState<LayerState>({});
+  const [isScanning, setIsScanning] = useState(false);
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;
@@ -92,12 +94,15 @@ function App() {
       setError('Electron API not available');
       return;
     }
+    setIsScanning(true);
     try {
       const result = await window.pii.scanText(input);
       setRedacted(result.redactedText);
       setMatches(result.matches);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Scan failed');
+    } finally {
+      setIsScanning(false);
     }
   }, [input]);
 
@@ -127,32 +132,47 @@ function App() {
 
   const detectedTypes = [...new Set(matches.map((m) => m.type))];
   const previewNodes = buildHighlightedPreview(input, matches);
-  const layerStatus = Object.entries(layerState)
-    .map(([name, enabled]) => `${name}: ${enabled ? "On" : "Off"}`)
-    .join(" · ");
+  const layerEntries = Object.entries(layerState).sort(([a], [b]) => a.localeCompare(b));
+
+  const handleLayerToggle = useCallback((name: string, enabled: boolean) => {
+    window.pii?.setLayer?.(name, enabled);
+  }, []);
 
   return (
     <div className="app">
       <div className="toolbar">
-        <button type="button" onClick={handleScan}>
-          Scan
+        <button type="button" onClick={handleScan} disabled={isScanning}>
+          {isScanning && <span className="spinner" aria-hidden />}
+          {isScanning ? 'Scanning…' : 'Scan'}
         </button>
-        <button type="button" onClick={handleCopy} disabled={!redacted}>
+        <button type="button" onClick={handleCopy} disabled={!redacted || isScanning}>
           Copy Redacted
         </button>
-        <button type="button" onClick={handleClear}>
+        <button type="button" onClick={handleClear} disabled={isScanning}>
           Clear
         </button>
       </div>
 
-      <div className="stats">
-        <strong>{matches.length}</strong> match{matches.length !== 1 ? 'es' : ''} found
-        {detectedTypes.length > 0 && (
+      <div className="stats" role="status" aria-live="polite" aria-busy={isScanning}>
+        <strong>{isScanning ? '—' : matches.length}</strong> match{isScanning || matches.length !== 1 ? 'es' : ''} found
+        {detectedTypes.length > 0 && !isScanning && (
           <div className="detected-types">
             Detected: {detectedTypes.map((t) => <span key={t}>{t}</span>) }
           </div>
         )}
-        <div style={{ fontSize: 12, color: '#a0a0a0', marginTop: 6 }}>{layerStatus}</div>
+        <div className="layer-toggles">
+          <span style={{ fontSize: 12, color: '#a0a0a0', marginRight: 8 }}>PII layers:</span>
+          {layerEntries.map(([name, enabled]) => (
+            <label key={name} className="layer-toggle">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => handleLayerToggle(name, e.target.checked)}
+              />
+              <span>{name.toLowerCase().includes('llama') ? 'LLM' : name}</span>
+            </label>
+          ))}
+        </div>
       </div>
 
       {error && (

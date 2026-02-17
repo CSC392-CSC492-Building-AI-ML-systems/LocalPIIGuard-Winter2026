@@ -101,6 +101,24 @@ body {
   padding: 8px 0;
 }
 
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #4a4a6a;
+  border-top-color: #7b9eff;
+  border-radius: 50%;
+  animation: spinner 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+@keyframes spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .stats strong {
   color: #eaeaea;
 }
@@ -118,6 +136,33 @@ body {
   border-radius: 4px;
   font-size: 11px;
   text-transform: uppercase;
+}
+
+.layer-toggles {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.layer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #a0a0a0;
+  user-select: none;
+}
+
+.layer-toggle input {
+  cursor: pointer;
+  accent-color: #4361ee;
+}
+
+.layer-toggle span {
+  color: #eaeaea;
 }
 
 .preview {
