@@ -14,7 +14,7 @@ function debug(...args: unknown[]): void {
   }
 }
 
-type OllamaPiiItem = { value: string; start: number; end: number; label: string };
+type OllamaPiiItem = { value: string; label: string };
 
 const VALID_PII_TYPES = new Set<string>([
   PiiType.EMAIL,
@@ -52,11 +52,9 @@ function getResponseSchema(): Record<string, unknown> {
     type: 'object',
     properties: {
       value: { type: 'string' },
-      start: { type: 'integer' },
-      end: { type: 'integer' },
       label: { type: 'string', enum: PII_TYPE_ENUM },
     },
-    required: ['value', 'start', 'end', 'label'],
+    required: ['value', 'label'],
   };
   return {
     type: 'object',
@@ -138,20 +136,18 @@ function findOccurrencesNormalized(
 }
 
 /**
- * Fallback: extract { value, start, end, label } objects from text via regex
+ * Fallback: extract { value, label } objects from text via regex
  * when JSON.parse fails or returns no items.
  */
 function parseJsonArrayFallback(response: string): OllamaPiiItem[] {
   const items: OllamaPiiItem[] = [];
-  const re = /"value"\s*:\s*"([^"]*)"\s*,\s*"start"\s*:\s*(\d+)\s*,\s*"end"\s*:\s*(\d+)\s*,\s*"label"\s*:\s*"([^"]*)"/g;
+  const re = /"value"\s*:\s*"([^"]*)"\s*,\s*"label"\s*:\s*"([^"]*)"/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(response)) !== null) {
     const value = m[1] ?? '';
-    const start = parseInt(m[2] ?? '', 10);
-    const end = parseInt(m[3] ?? '', 10);
-    const label = m[4] ?? '';
-    if (value && label && !isNaN(start) && !isNaN(end) && end > start) {
-      items.push({ value, start, end, label });
+    const label = m[2] ?? '';
+    if (value && label) {
+      items.push({ value, label });
     }
   }
   return items;
@@ -164,11 +160,9 @@ function normalizeItem(obj: unknown): OllamaPiiItem | null {
   if (obj == null || typeof obj !== 'object') return null;
   const o = obj as Record<string, unknown>;
   const value = typeof o.value === 'string' ? o.value : '';
-  const start = typeof o.start === 'number' ? Math.round(o.start) : -1;
-  const end = typeof o.end === 'number' ? Math.round(o.end) : -1;
   const label = typeof o.label === 'string' ? o.label : '';
-  if (!value || !label || start < 0 || end <= start) return null;
-  return { value, start, end, label };
+  if (!value || !label) return null;
+  return { value, label };
 }
 
 /**
@@ -222,15 +216,15 @@ pdmjrsyoz1460`;
 
 const FEW_SHOT_1_ASSISTANT = JSON.stringify({
   items: [
-    { value: 'wynqvrh053', start: 287, end: 297, label: 'USERNAME' },
-    { value: '10:20am', start: 311, end: 318, label: 'TIME' },
-    { value: 'luka.burg', start: 319, end: 328, label: 'USERNAME' },
-    { value: '21', start: 342, end: 344, label: 'TIME' },
-    { value: 'qahl.wittauer', start: 345, end: 358, label: 'USERNAME' },
-    { value: 'quarter past 13', start: 372, end: 387, label: 'TIME' },
-    { value: 'gholamhossein.ruschke', start: 388, end: 409, label: 'USERNAME' },
-    { value: '9:47 PM', start: 423, end: 430, label: 'TIME' },
-    { value: 'pdmjrsyoz1460', start: 431, end: 444, label: 'USERNAME' },
+    { value: 'wynqvrh053', label: 'USERNAME' },
+    { value: '10:20am', label: 'TIME' },
+    { value: 'luka.burg', label: 'USERNAME' },
+    { value: '21', label: 'TIME' },
+    { value: 'qahl.wittauer', label: 'USERNAME' },
+    { value: 'quarter past 13', label: 'TIME' },
+    { value: 'gholamhossein.ruschke', label: 'USERNAME' },
+    { value: '9:47 PM', label: 'TIME' },
+    { value: 'pdmjrsyoz1460', label: 'USERNAME' },
   ],
 });
 
@@ -238,24 +232,24 @@ const FEW_SHOT_2_USER = 'Card: KB90324ER\n Country: GB\n Building: 163\n Street:
 
 const FEW_SHOT_2_ASSISTANT = JSON.stringify({
   items: [
-    { value: 'KB90324ER', start: 6, end: 15, label: 'IDCARD' },
-    { value: 'GB', start: 29, end: 31, label: 'COUNTRY' },
-    { value: '163', start: 46, end: 49, label: 'BUILDING' },
-    { value: 'Conygre Grove', start: 62, end: 75, label: 'STREET' },
-    { value: 'Bristol', start: 86, end: 93, label: 'CITY' },
-    { value: 'ENG', start: 105, end: 108, label: 'STATE' },
-    { value: 'BS34 7HU, BS34 7HZ', start: 123, end: 141, label: 'POSTCODE' },
-    { value: 'q4R\\\\', start: 156, end: 161, label: 'PASS' },
-    { value: 'Baasgaran', start: 179, end: 188, label: 'LASTNAME' },
-    { value: 'Palmoso', start: 189, end: 196, label: 'LASTNAME' },
-    { value: 'blerenbaasgara@gmail.com', start: 208, end: 232, label: 'EMAIL' },
-    { value: '107-393-9036', start: 252, end: 264, label: 'SOCIALNUMBER' },
-    { value: 'SC78428CU', start: 278, end: 287, label: 'IDCARD' },
-    { value: 'United Kingdom', start: 301, end: 315, label: 'COUNTRY' },
-    { value: '646', start: 330, end: 333, label: 'BUILDING' },
-    { value: 'School Lane', start: 346, end: 357, label: 'STREET' },
-    { value: 'Altrincham', start: 368, end: 378, label: 'CITY' },
-    { value: 'ENG', start: 390, end: 393, label: 'STATE' },
+    { value: 'KB90324ER', label: 'IDCARD' },
+    { value: 'GB', label: 'COUNTRY' },
+    { value: '163', label: 'BUILDING' },
+    { value: 'Conygre Grove', label: 'STREET' },
+    { value: 'Bristol', label: 'CITY' },
+    { value: 'ENG', label: 'STATE' },
+    { value: 'BS34 7HU, BS34 7HZ', label: 'POSTCODE' },
+    { value: 'q4R\\\\', label: 'PASS' },
+    { value: 'Baasgaran', label: 'LASTNAME' },
+    { value: 'Palmoso', label: 'LASTNAME' },
+    { value: 'blerenbaasgara@gmail.com', label: 'EMAIL' },
+    { value: '107-393-9036', label: 'SOCIALNUMBER' },
+    { value: 'SC78428CU', label: 'IDCARD' },
+    { value: 'United Kingdom', label: 'COUNTRY' },
+    { value: '646', label: 'BUILDING' },
+    { value: 'School Lane', label: 'STREET' },
+    { value: 'Altrincham', label: 'CITY' },
+    { value: 'ENG', label: 'STATE' },
   ],
 });
 
@@ -274,19 +268,16 @@ export class LlamaDetector implements PIIDetector {
       return [];
     }
 
-    const systemPrompt = `You are a PII scrubbing assistant that expertly identifies and locates private data in text.
+    const systemPrompt = `You are a PII scrubbing assistant that identifies private data in text.
 
 For each piece of PII found, return a JSON object with an "items" array. Each item must have:
-- "value": the exact substring from the text (character-for-character)
-- "start": the starting character offset (0-based)
-- "end": the ending character offset (exclusive)
+- "value": the exact substring from the text (character-for-character, copy it exactly)
 - "label": the PII category label
 
 Supported labels: ${PII_TYPE_ENUM.join(', ')}
 
 Rules:
 - Only mark PII that is explicitly present in the text. Use the exact substring.
-- "start" and "end" must be accurate character offsets into the original text.
 - Never infer missing parts (e.g. do not add a city if the text only says "I live downtown").
 - If unsure whether something is PII, do not include it.
 - Return {"items": []} only if there is absolutely no PII present.`;
@@ -354,24 +345,6 @@ Rules:
         if (!value) continue;
         const label = item.label.toUpperCase().trim();
 
-        // First, validate LLM-provided positions
-        if (item.start >= 0 && item.end > item.start && item.end <= text.length) {
-          const textSlice = text.slice(item.start, item.end);
-          if (textSlice === value) {
-            rawMatches.push({
-              type,
-              start: item.start,
-              end: item.end,
-              value,
-              source: this.getName(),
-              label,
-            });
-            continue;
-          }
-          debug('position mismatch for', label, ':', JSON.stringify(value), 'vs', JSON.stringify(textSlice));
-        }
-
-        // Fallback: find occurrences by text search
         let occurrences = findOccurrences(text, value);
         if (
           occurrences.length === 0 &&
