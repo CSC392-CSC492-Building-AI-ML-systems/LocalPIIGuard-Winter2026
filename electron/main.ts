@@ -88,6 +88,7 @@ const PII_DEBUG = /^1|true|yes$/i.test(process.env.PII_DEBUG ?? '');
 ipcMain.handle('pii:scan', async (_event, text: string) => {
   const input = text ?? '';
   const activeDetectors = piiDetector.filter(detector => layerState[detector.getName()]);
+  const startMs = Date.now();
   console.log('[PII scan] start', { inputLen: input.length, active: activeDetectors.map(d => d.getName()) });
   if (PII_DEBUG) {
     console.log('[PII scan] input length:', input.length, 'active layers:', activeDetectors.map(d => d.getName()));
@@ -116,10 +117,14 @@ ipcMain.handle('pii:scan', async (_event, text: string) => {
   }
 
   const result = buildRedaction(input, merged);
+  const elapsedMs = Date.now() - startMs;
+  const llama = activeDetectors.find((d) => d.getName() === 'LLM');
+  const llmTokens = llama && 'getLastEvalCount' in llama ? (llama as LlamaDetector).getLastEvalCount() : undefined;
+  const llmElapsedMs = llama && 'getLastElapsedMs' in llama ? (llama as LlamaDetector).getLastElapsedMs() : undefined;
   if (PII_DEBUG) {
-    console.log('[PII scan] redacted length:', result.redactedText.length, 'preview:', result.redactedText.slice(0, 120));
+    console.log('[PII scan] redacted length:', result.redactedText.length, 'preview:', result.redactedText.slice(0, 120), 'elapsedMs:', elapsedMs, 'llmTokens:', llmTokens, 'llmElapsedMs:', llmElapsedMs);
   }
-  return result;
+  return { ...result, elapsedMs, llmTokens, llmElapsedMs };
 });
 
 ipcMain.handle('pii:copy', (_event, text: string) => {

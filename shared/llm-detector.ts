@@ -4,7 +4,7 @@ import { selectNonOverlapping } from './helper';
 
 const OLLAMA_BASE = process.env.PII_OLLAMA_BASE ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.PII_OLLAMA_MODEL ?? 'llama3.2:3b';
-const OLLAMA_TIMEOUT_MS = Number(process.env.PII_OLLAMA_TIMEOUT_MS) || 60000;
+const OLLAMA_TIMEOUT_MS = Number(process.env.PII_OLLAMA_TIMEOUT_MS) || 300000;
 
 const DEBUG = /^1|true|yes$/i.test(process.env.PII_LLM_DEBUG ?? '') || /^1|true|yes$/i.test(process.env.PII_DEBUG ?? '');
 
@@ -46,13 +46,24 @@ const PII_TYPE_ENUM = [
   'BUILDING', 'STREET', 'CITY', 'STATE', 'POSTCODE', 'PASS', 'SOCIALNUMBER',
 ];
 
-/** JSON schema for chat format: root object with items array. */
-function getResponseSchema(): Record<string, unknown> {
+/** Multi-pass label groups so the model has a narrower search space per pass. */
+const LABEL_GROUP_A: string[] = [
+  'EMAIL', 'PHONE', 'IP', 'CARD', 'SOCIALNUMBER', 'IDCARD', 'USERNAME', 'PASS',
+];
+const LABEL_GROUP_B: string[] = [
+  'STREET', 'BUILDING', 'POSTCODE', 'CITY', 'STATE', 'COUNTRY',
+];
+const LABEL_GROUP_C: string[] = [
+  'NAME', 'FIRSTNAME', 'LASTNAME', 'ORG', 'LOCATION', 'DATE', 'TIME',
+];
+
+/** JSON schema for chat format: root object with items array. Optional enum restricts labels per pass. */
+function getResponseSchema(allowedLabels: string[]): Record<string, unknown> {
   const itemSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
       value: { type: 'string' },
-      label: { type: 'string', enum: PII_TYPE_ENUM },
+      label: { type: 'string', enum: allowedLabels.length > 0 ? allowedLabels : PII_TYPE_ENUM },
     },
     required: ['value', 'label'],
   };
@@ -62,7 +73,7 @@ function getResponseSchema(): Record<string, unknown> {
       items: {
         type: 'array',
         items: itemSchema,
-        description: 'All PII spans found; use [] only when there are none',
+        description: 'All PII spans found; use [] only when there are none. Return all items, even if there are many (200+ is OK).',
       },
     },
     required: ['items'],
@@ -254,10 +265,141 @@ const FEW_SHOT_2_ASSISTANT = JSON.stringify({
 });
 
 /* ------------------------------------------------------------------ */
+/*  Single-chunk, single-pass detection (used by collectMatches)        */
+/* ------------------------------------------------------------------ */
+
+const TYPES_WITH_NORMALIZED_MATCHING = new Set<PiiType>([PiiType.PHONE, PiiType.CARD, PiiType.SOCIALNUMBER]);
+
+type ChunkPassResult = { matches: RawMatch[]; evalCount: number };
+
+async function detectChunk(
+  chunk: { text: string; offset: number },
+  allowedLabels: string[],
+  sourceName: string
+): Promise<ChunkPassResult> {
+  const labelsList = allowedLabels.join(', ');
+  const systemPrompt = `You are a PII scrubbing assistant. For this pass, only identify these PII types: ${labelsList}.
+
+Return a JSON object with an "items" array. Each item must have:
+- "value": the exact substring from the text (character-for-character, copy it exactly)
+- "label": one of ${labelsList}
+
+Rules:
+- Only mark PII that is explicitly present in the text. Use the exact substring.
+- Never infer missing parts.
+- If unsure whether something is PII, do not include it.
+- Return all items, even if there are many. It is OK if items length is 200+.
+- Return {"items": []} only if there is no PII of these types in the text.`;
+
+  const messages: Array<{ role: string; content: string }> = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: FEW_SHOT_1_USER },
+    { role: 'assistant', content: FEW_SHOT_1_ASSISTANT },
+    { role: 'user', content: FEW_SHOT_2_USER },
+    { role: 'assistant', content: FEW_SHOT_2_ASSISTANT },
+    { role: 'user', content: chunk.text },
+  ];
+
+  const url = `${OLLAMA_BASE}/api/chat`;
+  const startMs = performance.now();
+  debug('request', { url, model: OLLAMA_MODEL, chunkLen: chunk.text.length, offset: chunk.offset, labels: labelsList });
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        stream: false,
+        format: getResponseSchema(allowedLabels),
+        messages,
+        options: {
+          temperature: 0,
+          top_p: 0,
+        },
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    const elapsedMs = Math.round(performance.now() - startMs);
+    debug('response', { ok: res.ok, status: res.status, elapsedMs });
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      debug('response not ok', res.status, errBody.slice(0, 300));
+      return { matches: [], evalCount: 0 };
+    }
+
+    const data = (await res.json()) as {
+      message?: { content?: unknown };
+      eval_count?: number;
+    };
+    const evalCount = typeof data?.eval_count === 'number' ? data.eval_count : 0;
+    const content = data?.message?.content;
+    const responseText = typeof content === 'string' ? content : content != null ? String(content) : '';
+
+    let items: OllamaPiiItem[];
+    try {
+      items = parseJsonArray(responseText);
+    } catch {
+      return { matches: [], evalCount };
+    }
+
+    const allowedSet = new Set(allowedLabels.map((l) => l.toUpperCase()));
+    const rawMatches: RawMatch[] = [];
+
+    for (const item of items) {
+      const type = mapType(item.label);
+      if (!type || !allowedSet.has(item.label.toUpperCase().trim())) continue;
+      const value = String(item.value).trim();
+      if (!value) continue;
+      const label = item.label.toUpperCase().trim();
+
+      let occurrences = findOccurrences(chunk.text, value);
+      if (
+        occurrences.length === 0 &&
+        TYPES_WITH_NORMALIZED_MATCHING.has(type) &&
+        /\d/.test(value)
+      ) {
+        occurrences = findOccurrencesNormalized(chunk.text, value);
+      }
+      for (const { start, end, value: spanValue } of occurrences) {
+        rawMatches.push({
+          type,
+          start: chunk.offset + start,
+          end: chunk.offset + end,
+          value: spanValue,
+          source: sourceName,
+          label,
+        });
+      }
+    }
+
+    debug('pass done', { labels: labelsList, itemsFound: rawMatches.length, evalCount, elapsedMs: Math.round(performance.now() - startMs) });
+    return { matches: rawMatches, evalCount };
+  } catch (err) {
+    clearTimeout(timeoutId);
+    debug('error:', err instanceof Error ? err.message : err);
+    if (DEBUG && err instanceof Error && err.stack) {
+      console.log('[PII LLM] stack:', err.stack);
+    }
+    return { matches: [], evalCount: 0 };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Detector class                                                     */
 /* ------------------------------------------------------------------ */
 
+const LABEL_GROUPS = [LABEL_GROUP_A, LABEL_GROUP_B, LABEL_GROUP_C] as const;
+
 export class LlamaDetector implements PIIDetector {
+  private lastEvalCount = 0;
+  private lastElapsedMs = 0;
+
   async collectMatches(text: string): Promise<RawMatch[]> {
     if (!text.trim()) {
       debug('collectMatches: empty text, skipping');
@@ -268,112 +410,27 @@ export class LlamaDetector implements PIIDetector {
       return [];
     }
 
-    const systemPrompt = `You are a PII scrubbing assistant that identifies private data in text.
+    const allMatches: RawMatch[] = [];
+    const singleChunk = { text, offset: 0 };
+    this.lastEvalCount = 0;
+    const startMs = Date.now();
 
-For each piece of PII found, return a JSON object with an "items" array. Each item must have:
-- "value": the exact substring from the text (character-for-character, copy it exactly)
-- "label": the PII category label
-
-Supported labels: ${PII_TYPE_ENUM.join(', ')}
-
-Rules:
-- Only mark PII that is explicitly present in the text. Use the exact substring.
-- Never infer missing parts (e.g. do not add a city if the text only says "I live downtown").
-- If unsure whether something is PII, do not include it.
-- Return {"items": []} only if there is absolutely no PII present.`;
-
-    const messages: Array<{ role: string; content: string }> = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: FEW_SHOT_1_USER },
-      { role: 'assistant', content: FEW_SHOT_1_ASSISTANT },
-      { role: 'user', content: FEW_SHOT_2_USER },
-      { role: 'assistant', content: FEW_SHOT_2_ASSISTANT },
-      { role: 'user', content: text },
-    ];
-
-    const url = `${OLLAMA_BASE}/api/chat`;
-    debug('request', { url, model: OLLAMA_MODEL, textLength: text.length, timeoutMs: OLLAMA_TIMEOUT_MS });
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
-
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: OLLAMA_MODEL,
-          stream: false,
-          format: getResponseSchema(),
-          messages,
-          options: {
-            temperature: 0,
-            top_p: 0,
-          },
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-
-      debug('response', { ok: res.ok, status: res.status, statusText: res.statusText });
-
-      if (!res.ok) {
-        const errBody = await res.text();
-        debug('response not ok, body:', errBody.slice(0, 500));
-        return [];
-      }
-
-      const data = (await res.json()) as { message?: { content?: unknown } };
-      const content = data?.message?.content;
-      const responseText = typeof content === 'string' ? content : content != null ? String(content) : '';
-      debug('response body length:', responseText.length, 'preview (first 200):', responseText.slice(0, 200));
-
-      let items: OllamaPiiItem[];
-      try {
-        items = parseJsonArray(responseText);
-      } catch {
-        return [];
-      }
-
-      const rawMatches: RawMatch[] = [];
-      const typesWithNormalizedMatching = new Set<PiiType>([PiiType.PHONE, PiiType.CARD, PiiType.SOCIALNUMBER]);
-
-      for (const item of items) {
-        const type = mapType(item.label);
-        if (!type) continue;
-        const value = String(item.value).trim();
-        if (!value) continue;
-        const label = item.label.toUpperCase().trim();
-
-        let occurrences = findOccurrences(text, value);
-        if (
-          occurrences.length === 0 &&
-          typesWithNormalizedMatching.has(type) &&
-          /\d/.test(value)
-        ) {
-          occurrences = findOccurrencesNormalized(text, value);
-        }
-        for (const { start, end, value: spanValue } of occurrences) {
-          rawMatches.push({
-            type,
-            start,
-            end,
-            value: spanValue,
-            source: this.getName(),
-            label,
-          });
-        }
-      }
-
-      return selectNonOverlapping(rawMatches);
-    } catch (err) {
-      clearTimeout(timeoutId);
-      debug('error:', err instanceof Error ? err.message : err);
-      if (DEBUG && err instanceof Error && err.stack) {
-        console.log('[PII LLM] stack:', err.stack);
-      }
-      return [];
+    for (const group of LABEL_GROUPS) {
+      const { matches, evalCount } = await detectChunk(singleChunk, group, this.getName());
+      allMatches.push(...matches);
+      this.lastEvalCount += evalCount;
     }
+
+    this.lastElapsedMs = Date.now() - startMs;
+    return selectNonOverlapping(allMatches);
+  }
+
+  getLastEvalCount(): number {
+    return this.lastEvalCount;
+  }
+
+  getLastElapsedMs(): number {
+    return this.lastElapsedMs;
   }
 
   getName(): string {

@@ -11,6 +11,9 @@ interface Match {
 interface ScanResult {
   redactedText: string;
   matches: Match[];
+  elapsedMs?: number;
+  llmTokens?: number;
+  llmElapsedMs?: number;
 }
 
 type LayerState = Record<string, boolean>;
@@ -31,6 +34,27 @@ function escapeHtml(text: string): string {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  if (ms < 60_000) {
+    const s = ms / 1000;
+    return s % 1 === 0 ? `${s} s` : `${s.toFixed(1)} s`;
+  }
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return seconds > 0 ? `${minutes} m ${seconds} s` : `${minutes} m`;
+}
+
+function formatTimePerToken(llmElapsedMs: number, llmTokens: number): string {
+  if (llmTokens <= 0) return '';
+  const msPerTok = llmElapsedMs / llmTokens;
+  const tokPerS = (llmTokens / (llmElapsedMs / 1000));
+  if (msPerTok >= 1) {
+    return `${msPerTok.toFixed(1)} ms/tok · ${tokPerS.toFixed(1)} tok/s`;
+  }
+  return `${(msPerTok * 1000).toFixed(0)} µs/tok · ${tokPerS.toFixed(0)} tok/s`;
 }
 
 function buildHighlightedPreview(text: string, matches: Match[]): React.ReactNode[] {
@@ -60,6 +84,9 @@ function App() {
   const [input, setInput] = useState('');
   const [redacted, setRedacted] = useState('');
   const [matches, setMatches] = useState<Match[]>([]);
+  const [elapsedMs, setElapsedMs] = useState<number | undefined>(undefined);
+  const [llmTokens, setLlmTokens] = useState<number | undefined>(undefined);
+  const [llmElapsedMs, setLlmElapsedMs] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [layerState, setLayerState] = useState<LayerState>({});
   const [isScanning, setIsScanning] = useState(false);
@@ -99,6 +126,9 @@ function App() {
       const result = await window.pii.scanText(input);
       setRedacted(result.redactedText);
       setMatches(result.matches);
+      setElapsedMs(result.elapsedMs);
+      setLlmTokens(result.llmTokens);
+      setLlmElapsedMs(result.llmElapsedMs);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Scan failed');
     } finally {
@@ -127,6 +157,9 @@ function App() {
     setInput('');
     setRedacted('');
     setMatches([]);
+    setElapsedMs(undefined);
+    setLlmTokens(undefined);
+    setLlmElapsedMs(undefined);
     setError(null);
   }, []);
 
@@ -155,6 +188,19 @@ function App() {
 
       <div className="stats" role="status" aria-live="polite" aria-busy={isScanning}>
         <strong>{isScanning ? '—' : matches.length}</strong> match{isScanning || matches.length !== 1 ? 'es' : ''} found
+        {elapsedMs != null && !isScanning && (
+          <span className="elapsed" style={{ marginLeft: 8, color: '#888', fontWeight: 'normal' }}>
+            in {formatElapsed(elapsedMs)}
+            {llmTokens != null && llmElapsedMs != null && llmTokens > 0 && (
+              <span style={{ marginLeft: 8 }}>
+                · {llmTokens.toLocaleString()} tok
+                {llmElapsedMs > 0 && (
+                  <> · {formatTimePerToken(llmElapsedMs, llmTokens)}</>
+                )}
+              </span>
+            )}
+          </span>
+        )}
         {detectedTypes.length > 0 && !isScanning && (
           <div className="detected-types">
             Detected: {detectedTypes.map((t) => <span key={t}>{t}</span>) }
