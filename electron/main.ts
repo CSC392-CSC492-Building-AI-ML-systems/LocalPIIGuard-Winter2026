@@ -6,10 +6,12 @@ const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
 import { RegexDetector } from '../shared/regex-detector'
 import { NerDetector } from '../shared/ner-detector';
+import { PresidioDetector } from '../shared/presidio-detector';
 
 const piiDetector = [
   new RegexDetector(),
-  new NerDetector()
+  new NerDetector(),
+  new PresidioDetector()
 ]
 
 type LayerState = Record<string, boolean>;

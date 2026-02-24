@@ -6,7 +6,11 @@
   NAME = "NAME",
   LOCATION = "LOCATION",
   ORG = "ORG",
-  DATE = "DATE"
+  DATE = "DATE", 
+  FINANCIAL = "FINANCIAL", 
+  MISC = "MISC", 
+  ID = "ID", 
+  URL = "URL"
 }
 
 export interface Match {
