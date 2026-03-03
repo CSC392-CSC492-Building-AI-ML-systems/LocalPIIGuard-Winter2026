@@ -18,6 +18,14 @@ python -m pip install -r scripts/requirements-spacy.txt
 python -m spacy download en_core_web_sm
 ```
 
+Optional — for the **GLiNER** PII detector layer (ONNX, CPU-friendly):
+
+```bash
+python -m pip install -r scripts/requirements-gliner.txt
+```
+
+The first run will download the `ineersa/gliner-PII-onnx` model from Hugging Face, which is ~1.8GB.
+
 Optional — for the **LLM** detector layer:
 
 1. Install [Ollama](https://ollama.com) and run: `ollama pull mistral:7b-instruct-v0.3-q4_K_M` (or another model; set `PII_OLLAMA_MODEL` to match).

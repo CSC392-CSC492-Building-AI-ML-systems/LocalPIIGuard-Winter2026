@@ -1,6 +1,7 @@
 // ner-detector-cli.cjs
-const { NerDetector } = require('../dist-electron/shared/ner-detector.js'); 
+const { NerDetector } = require('../dist-electron/shared/ner-detector.js');
 const { RegexDetector } = require('../dist-electron/shared/regex-detector.js');
+const { GlinerDetector } = require('../dist-electron/shared/gliner-detector.js');
 
 const process = require('process');
 
@@ -24,12 +25,15 @@ if (!data || !detectorType) {
 
     // Choose detector based on integer
     let detector;
-    switch (parseInt(detectorType)) {
+    switch (parseInt(detectorType, 10)) {
         case 1:
             detector = new RegexDetector();
             break;
         case 2:
             detector = new NerDetector();
+            break;
+        case 3:
+            detector = new GlinerDetector();
             break;
         default:
             console.error("Unknown detector type:", detectorType);

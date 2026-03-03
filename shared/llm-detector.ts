@@ -3,7 +3,7 @@ import { PiiType } from './types';
 import { selectNonOverlapping } from './helper';
 
 const OLLAMA_BASE = process.env.PII_OLLAMA_BASE ?? 'http://localhost:11434';
-const OLLAMA_MODEL = process.env.PII_OLLAMA_MODEL ?? 'llama3.2:3b';
+const OLLAMA_MODEL = process.env.PII_OLLAMA_MODEL ?? 'phi4-mini';
 const OLLAMA_TIMEOUT_MS = Number(process.env.PII_OLLAMA_TIMEOUT_MS) || 300000;
 
 const DEBUG = /^1|true|yes$/i.test(process.env.PII_LLM_DEBUG ?? '') || /^1|true|yes$/i.test(process.env.PII_DEBUG ?? '');
@@ -44,17 +44,6 @@ const PII_TYPE_ENUM = [
   'EMAIL', 'PHONE', 'IP', 'CARD', 'NAME', 'FIRSTNAME', 'LASTNAME',
   'LOCATION', 'ORG', 'DATE', 'USERNAME', 'TIME', 'IDCARD', 'COUNTRY',
   'BUILDING', 'STREET', 'CITY', 'STATE', 'POSTCODE', 'PASS', 'SOCIALNUMBER',
-];
-
-/** Multi-pass label groups so the model has a narrower search space per pass. */
-const LABEL_GROUP_A: string[] = [
-  'EMAIL', 'PHONE', 'IP', 'CARD', 'SOCIALNUMBER', 'IDCARD', 'USERNAME', 'PASS',
-];
-const LABEL_GROUP_B: string[] = [
-  'STREET', 'BUILDING', 'POSTCODE', 'CITY', 'STATE', 'COUNTRY',
-];
-const LABEL_GROUP_C: string[] = [
-  'NAME', 'FIRSTNAME', 'LASTNAME', 'ORG', 'LOCATION', 'DATE', 'TIME',
 ];
 
 /** JSON schema for chat format: root object with items array. Optional enum restricts labels per pass. */
@@ -391,10 +380,8 @@ Rules:
 }
 
 /* ------------------------------------------------------------------ */
-/*  Detector class                                                     */
+/*  Detector class (single-pass over all labels)                      */
 /* ------------------------------------------------------------------ */
-
-const LABEL_GROUPS = [LABEL_GROUP_A, LABEL_GROUP_B, LABEL_GROUP_C] as const;
 
 export class LlamaDetector implements PIIDetector {
   private lastEvalCount = 0;
@@ -410,19 +397,15 @@ export class LlamaDetector implements PIIDetector {
       return [];
     }
 
-    const allMatches: RawMatch[] = [];
     const singleChunk = { text, offset: 0 };
     this.lastEvalCount = 0;
     const startMs = Date.now();
 
-    for (const group of LABEL_GROUPS) {
-      const { matches, evalCount } = await detectChunk(singleChunk, group, this.getName());
-      allMatches.push(...matches);
-      this.lastEvalCount += evalCount;
-    }
+    const { matches, evalCount } = await detectChunk(singleChunk, PII_TYPE_ENUM, this.getName());
+    this.lastEvalCount = evalCount;
 
     this.lastElapsedMs = Date.now() - startMs;
-    return selectNonOverlapping(allMatches);
+    return selectNonOverlapping(matches);
   }
 
   getLastEvalCount(): number {
