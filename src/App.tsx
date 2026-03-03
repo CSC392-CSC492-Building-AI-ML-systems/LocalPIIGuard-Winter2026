@@ -1,4 +1,4 @@
-﻿import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
 
 interface Match {
@@ -11,16 +11,20 @@ interface Match {
 interface ScanResult {
   redactedText: string;
   matches: Match[];
+  elapsedMs?: number;
+  llmTokens?: number;
+  llmElapsedMs?: number;
 }
 
 type LayerState = Record<string, boolean>;
 
 declare global {
-  interface Window {
+    interface Window {
     pii?: {
       scanText: (text: string) => Promise<ScanResult>;
       copyToClipboard: (text: string) => Promise<void>;
       getLayerState: () => Promise<LayerState>;
+      setLayer: (name: string, enabled: boolean) => Promise<void>;
       onLayerState: (handler: (state: LayerState) => void) => () => void;
     };
   }
@@ -30,6 +34,27 @@ function escapeHtml(text: string): string {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  if (ms < 60_000) {
+    const s = ms / 1000;
+    return s % 1 === 0 ? `${s} s` : `${s.toFixed(1)} s`;
+  }
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return seconds > 0 ? `${minutes} m ${seconds} s` : `${minutes} m`;
+}
+
+function formatTimePerToken(llmElapsedMs: number, llmTokens: number): string {
+  if (llmTokens <= 0) return '';
+  const msPerTok = llmElapsedMs / llmTokens;
+  const tokPerS = (llmTokens / (llmElapsedMs / 1000));
+  if (msPerTok >= 1) {
+    return `${msPerTok.toFixed(1)} ms/tok · ${tokPerS.toFixed(1)} tok/s`;
+  }
+  return `${(msPerTok * 1000).toFixed(0)} µs/tok · ${tokPerS.toFixed(0)} tok/s`;
 }
 
 function buildHighlightedPreview(text: string, matches: Match[]): React.ReactNode[] {
@@ -59,8 +84,12 @@ function App() {
   const [input, setInput] = useState('');
   const [redacted, setRedacted] = useState('');
   const [matches, setMatches] = useState<Match[]>([]);
+  const [elapsedMs, setElapsedMs] = useState<number | undefined>(undefined);
+  const [llmTokens, setLlmTokens] = useState<number | undefined>(undefined);
+  const [llmElapsedMs, setLlmElapsedMs] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [layerState, setLayerState] = useState<LayerState>({});
+  const [isScanning, setIsScanning] = useState(false);
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;
@@ -92,12 +121,18 @@ function App() {
       setError('Electron API not available');
       return;
     }
+    setIsScanning(true);
     try {
       const result = await window.pii.scanText(input);
       setRedacted(result.redactedText);
       setMatches(result.matches);
+      setElapsedMs(result.elapsedMs);
+      setLlmTokens(result.llmTokens);
+      setLlmElapsedMs(result.llmElapsedMs);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Scan failed');
+    } finally {
+      setIsScanning(false);
     }
   }, [input]);
 
@@ -122,37 +157,68 @@ function App() {
     setInput('');
     setRedacted('');
     setMatches([]);
+    setElapsedMs(undefined);
+    setLlmTokens(undefined);
+    setLlmElapsedMs(undefined);
     setError(null);
   }, []);
 
   const detectedTypes = [...new Set(matches.map((m) => m.type))];
   const previewNodes = buildHighlightedPreview(input, matches);
-  const layerStatus = Object.entries(layerState)
-    .map(([name, enabled]) => `${name}: ${enabled ? "On" : "Off"}`)
-    .join(" · ");
+  const layerEntries = Object.entries(layerState).sort(([a], [b]) => a.localeCompare(b));
+
+  const handleLayerToggle = useCallback((name: string, enabled: boolean) => {
+    window.pii?.setLayer?.(name, enabled);
+  }, []);
 
   return (
     <div className="app">
       <div className="toolbar">
-        <button type="button" onClick={handleScan}>
-          Scan
+        <button type="button" onClick={handleScan} disabled={isScanning}>
+          {isScanning && <span className="spinner" aria-hidden />}
+          {isScanning ? 'Scanning…' : 'Scan'}
         </button>
-        <button type="button" onClick={handleCopy} disabled={!redacted}>
+        <button type="button" onClick={handleCopy} disabled={!redacted || isScanning}>
           Copy Redacted
         </button>
-        <button type="button" onClick={handleClear}>
+        <button type="button" onClick={handleClear} disabled={isScanning}>
           Clear
         </button>
       </div>
 
-      <div className="stats">
-        <strong>{matches.length}</strong> match{matches.length !== 1 ? 'es' : ''} found
-        {detectedTypes.length > 0 && (
+      <div className="stats" role="status" aria-live="polite" aria-busy={isScanning}>
+        <strong>{isScanning ? '—' : matches.length}</strong> match{isScanning || matches.length !== 1 ? 'es' : ''} found
+        {elapsedMs != null && !isScanning && (
+          <span className="elapsed" style={{ marginLeft: 8, color: '#888', fontWeight: 'normal' }}>
+            in {formatElapsed(elapsedMs)}
+            {llmTokens != null && llmElapsedMs != null && llmTokens > 0 && (
+              <span style={{ marginLeft: 8 }}>
+                · {llmTokens.toLocaleString()} tok
+                {llmElapsedMs > 0 && (
+                  <> · {formatTimePerToken(llmElapsedMs, llmTokens)}</>
+                )}
+              </span>
+            )}
+          </span>
+        )}
+        {detectedTypes.length > 0 && !isScanning && (
           <div className="detected-types">
             Detected: {detectedTypes.map((t) => <span key={t}>{t}</span>) }
           </div>
         )}
-        <div style={{ fontSize: 12, color: '#a0a0a0', marginTop: 6 }}>{layerStatus}</div>
+        <div className="layer-toggles">
+          <span style={{ fontSize: 12, color: '#a0a0a0', marginRight: 8 }}>PII layers:</span>
+          {layerEntries.map(([name, enabled]) => (
+            <label key={name} className="layer-toggle">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => handleLayerToggle(name, e.target.checked)}
+              />
+              <span>{name.toLowerCase().includes('llama') ? 'LLM' : name}</span>
+            </label>
+          ))}
+        </div>
       </div>
 
       {error && (
