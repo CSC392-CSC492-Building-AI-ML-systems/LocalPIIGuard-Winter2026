@@ -23,6 +23,7 @@ export enum PiiType {
   POSTCODE = "POSTCODE",
   PASS = "PASS",
   SOCIALNUMBER = "SOCIALNUMBER",
+  BLACKLIST = "BLACKLIST",
 }
 
 export interface Match {
