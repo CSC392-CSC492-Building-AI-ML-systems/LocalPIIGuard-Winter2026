@@ -25,3 +25,22 @@ export function selectNonOverlapping(matches: RawMatch[]): RawMatch[] {
   selected.sort((a, b) => a.start - b.start);
   return selected;
 }
+
+/**
+ * Find all non-overlapping occurrences of needle in text.
+ */
+export function findOccurrences(
+  text: string,
+  needle: string
+): Array<{ start: number; end: number }> {
+  if (!needle) return [];
+  const spans: Array<{ start: number; end: number }> = [];
+  let pos = 0;
+  while (pos < text.length) {
+    const idx = text.indexOf(needle, pos);
+    if (idx === -1) break;
+    spans.push({ start: idx, end: idx + needle.length });
+    pos = idx + needle.length;
+  }
+  return spans;
+}

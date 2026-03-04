@@ -1,70 +1,36 @@
-import type { Match, RawMatch, ScanResult } from './types';
-import { selectNonOverlapping, overlaps } from './helper';
+import type { Match, RawMatch } from './types';
+import type { PiiType } from './types';
+import { findOccurrences } from './helper';
 
 /**
- * Merge base (regex) matches with extra (NER) matches.
- * Extra matches that overlap base are discarded.
+ * Mask text by replacing matched spans with [LABEL] placeholders.
+ * Applied from end to start to preserve indices during replacement.
  */
-export function mergeMatches(
-  baseMatches: RawMatch[],
-  extraMatches: RawMatch[]
-): RawMatch[] {
-  const base = selectNonOverlapping(baseMatches);
-  const extra = selectNonOverlapping(extraMatches).filter(
-    (m) => !base.some((b) => overlaps(m, b))
-  );
-
-  const merged = [...base, ...extra];
-  merged.sort((a, b) => a.start - b.start);
-  return merged;
+export function maskText(text: string, rawMatches: RawMatch[]): string {
+  const sorted = [...rawMatches].sort((a, b) => b.start - a.start);
+  let result = text;
+  for (const m of sorted) {
+    const tag = m.label ?? m.type;
+    result = result.slice(0, m.start) + `[${tag}]` + result.slice(m.end);
+  }
+  return result;
 }
 
 /**
- * Build placeholder map: same value => same placeholder within a scan.
- * Uses the original label from the detector if available, otherwise falls
- * back to the PiiType.  No numeric suffix is appended.
+ * Reconstruct Match positions in the original text via exact string matching.
+ * Called after the full pipeline to map collected { value, source, type } detections
+ * back to spans in the original text for the inline preview.
  */
-function buildPlaceholderMap(matches: RawMatch[]): Map<string, string> {
-  const valueToPlaceholder = new Map<string, string>();
-
-  for (const m of matches) {
-    const key = `${m.type}:${m.value}`;
-    if (!valueToPlaceholder.has(key)) {
-      const tag = m.label ?? m.type;
-      valueToPlaceholder.set(key, `[${tag}]`);
+export function reconstructMatches(
+  originalText: string,
+  detections: Array<{ value: string; source: string; type: PiiType }>
+): Match[] {
+  const matches: Match[] = [];
+  for (const { value, source, type } of detections) {
+    for (const { start, end } of findOccurrences(originalText, value)) {
+      matches.push({ type, start, end, value, source });
     }
   }
-
-  return valueToPlaceholder;
-}
-
-/**
- * Build redacted text and matches from a RawMatch list.
- */
-export function buildRedaction(text: string, rawMatches: RawMatch[]): ScanResult {
-  const placeholderMap = buildPlaceholderMap(rawMatches);
-
-  const matches: Match[] = rawMatches.map((m) => ({
-    type: m.type,
-    start: m.start,
-    end: m.end,
-    value: m.value,
-  }));
-
-  // Build redacted text by replacing from end to start (preserves indices)
-  let redactedText = text;
-  const replacements = rawMatches
-    .map((m) => {
-      const key = `${m.type}:${m.value}`;
-      const placeholder = placeholderMap.get(key)!;
-      return { start: m.start, end: m.end, placeholder };
-    })
-    .sort((a, b) => b.start - a.start); // reverse order
-
-  for (const { start, end, placeholder } of replacements) {
-    redactedText =
-      redactedText.slice(0, start) + placeholder + redactedText.slice(end);
-  }
-
-  return { redactedText, matches };
+  matches.sort((a, b) => a.start - b.start);
+  return matches;
 }

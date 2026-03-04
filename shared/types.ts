@@ -2,7 +2,10 @@ export enum PiiType {
   EMAIL = "EMAIL",
   PHONE = "PHONE",
   IP = "IP",
+  IPV6 = "IPV6",
+  MAC = "MAC",
   CARD = "CARD",
+  IBAN = "IBAN",
   NAME = "NAME",
   FIRSTNAME = "FIRSTNAME",
   LASTNAME = "LASTNAME",
@@ -27,6 +30,7 @@ export interface Match {
   start: number;
   end: number;
   value: string;
+  source: string;
 }
 
 export interface RawMatch {

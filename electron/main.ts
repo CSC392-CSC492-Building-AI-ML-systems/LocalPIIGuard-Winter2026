@@ -1,18 +1,16 @@
 import { app, BrowserWindow, ipcMain, clipboard, Menu } from 'electron';
 import path from 'path';
-import { buildRedaction, mergeMatches } from '../shared/scanner';
+import { maskText, reconstructMatches } from '../shared/scanner';
+import type { PiiType } from '../shared/types';
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
 import { RegexDetector } from '../shared/regex-detector'
 import { NerDetector } from '../shared/ner-detector';
 import { LlamaDetector } from '../shared/llm-detector';
-import { GlinerDetector } from '../shared/gliner-detector';
-
 const piiDetector = [
   new RegexDetector(),
   new NerDetector(),
-  new GlinerDetector(),
   new LlamaDetector(),
 ]
 
@@ -96,29 +94,27 @@ ipcMain.handle('pii:scan', async (_event, text: string) => {
     console.log('[PII scan] input length:', input.length, 'active layers:', activeDetectors.map(d => d.getName()));
   }
 
-  // Collect all matches from active detectors
-  const allMatches = await Promise.all(
-    activeDetectors.map(detector => detector.collectMatches(input))
-  );
+  // Pipeline: run detectors sequentially, each on the masked output of the previous
+  let currentText = input;
+  const allDetections: Array<{ value: string; source: string; type: PiiType }> = [];
 
-  if (PII_DEBUG) {
-    activeDetectors.forEach((detector, i) => {
-      const count = allMatches[i]?.length ?? 0;
-      console.log('[PII scan]', detector.getName(), 'matches:', count, allMatches[i]?.slice(0, 3));
-    });
+  for (const detector of activeDetectors) {
+    const matches = await detector.collectMatches(currentText);
+    if (PII_DEBUG) {
+      console.log('[PII scan]', detector.getName(), 'matches:', matches.length, matches.slice(0, 3));
+    }
+    for (const m of matches) {
+      allDetections.push({ value: m.value, source: m.source, type: m.type });
+    }
+    currentText = maskText(currentText, matches);
   }
 
-  // Merge all matches starting from regexMatches
-  const merged = allMatches.reduce(
-    (acc, matches) => mergeMatches(acc, matches ?? []),
-    []
-  );
-
   if (PII_DEBUG) {
-    console.log('[PII scan] merged total:', merged.length, 'merged (first 5):', merged.slice(0, 5));
+    console.log('[PII scan] total detections:', allDetections.length);
   }
 
-  const result = buildRedaction(input, merged);
+  const finalMatches = reconstructMatches(input, allDetections);
+  const result = { redactedText: currentText, matches: finalMatches };
   const elapsedMs = Date.now() - startMs;
   const llama = activeDetectors.find((d) => d.getName() === 'LLM');
   const llmTokens = llama && 'getLastEvalCount' in llama ? (llama as LlamaDetector).getLastEvalCount() : undefined;

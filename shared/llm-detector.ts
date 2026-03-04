@@ -20,7 +20,10 @@ const VALID_PII_TYPES = new Set<string>([
   PiiType.EMAIL,
   PiiType.PHONE,
   PiiType.IP,
+  PiiType.IPV6,
+  PiiType.MAC,
   PiiType.CARD,
+  PiiType.IBAN,
   PiiType.NAME,
   PiiType.FIRSTNAME,
   PiiType.LASTNAME,
@@ -41,9 +44,10 @@ const VALID_PII_TYPES = new Set<string>([
 ]);
 
 const PII_TYPE_ENUM = [
-  'EMAIL', 'PHONE', 'IP', 'CARD', 'NAME', 'FIRSTNAME', 'LASTNAME',
-  'LOCATION', 'ORG', 'DATE', 'USERNAME', 'TIME', 'IDCARD', 'COUNTRY',
-  'BUILDING', 'STREET', 'CITY', 'STATE', 'POSTCODE', 'PASS', 'SOCIALNUMBER',
+  'EMAIL', 'PHONE', 'IP', 'IPV6', 'MAC', 'CARD', 'IBAN',
+  'NAME', 'FIRSTNAME', 'LASTNAME', 'LOCATION', 'ORG', 'DATE',
+  'USERNAME', 'TIME', 'IDCARD', 'COUNTRY', 'BUILDING', 'STREET',
+  'CITY', 'STATE', 'POSTCODE', 'PASS', 'SOCIALNUMBER',
 ];
 
 /** JSON schema for chat format: root object with items array. Optional enum restricts labels per pass. */
@@ -267,18 +271,35 @@ async function detectChunk(
   sourceName: string
 ): Promise<ChunkPassResult> {
   const labelsList = allowedLabels.join(', ');
-  const systemPrompt = `You are a PII scrubbing assistant. For this pass, only identify these PII types: ${labelsList}.
+  const systemPrompt = `You are a PII scrubbing assistant operating as the final stage of a detection pipeline.
+
+CONTEXT — earlier pipeline stages have already redacted some PII by replacing it with bracketed placeholders. The placeholders you may encounter are:
+[FIRSTNAME] [LASTNAME] [NAME] [EMAIL] [PHONE] [IP] [IPV6] [MAC] [CARD] [IBAN] [LOCATION] [ORG] [DATE] [TIME] [USERNAME] [IDCARD] [COUNTRY] [BUILDING] [STREET] [CITY] [STATE] [POSTCODE] [PASS] [SOCIALNUMBER]
+
+Do NOT return any of these placeholders as matches — they are already redacted.
+
+BACKGROUND — to help you recognise what counts as PII, here is a broad taxonomy of PII categories that earlier detectors cover. Anything in this taxonomy that is still present as real text in the input is your target:
+- Personal: first/last name, date of birth, age, gender, sexuality, race/ethnicity, religion, political view, occupation, education
+- Contact: email, phone, street address, city, county, state, country, coordinates, zip code, PO box
+- Financial: credit/debit card, CVV, bank routing number, account number, IBAN, SWIFT/BIC, PIN, SSN, tax ID, EIN
+- Government IDs: passport, driver's licence, licence plate, national ID, voter ID
+- Digital: IPv4, IPv6, MAC address, URL, username, password, device ID, IMEI, serial number, API key, secret key
+- Healthcare: medical record number, health plan ID, blood type, biometric identifier, health condition, medication, insurance policy
+- Temporal: date, time, datetime
+- Organisation: company name, employee ID, customer ID, certificate/licence number, vehicle identifier
+
+YOUR TASK — find any remaining unredacted PII of these output types only: ${labelsList}.
 
 Return a JSON object with an "items" array. Each item must have:
 - "value": the exact substring from the text (character-for-character, copy it exactly)
 - "label": one of ${labelsList}
 
 Rules:
-- Only mark PII that is explicitly present in the text. Use the exact substring.
-- Never infer missing parts.
+- Only mark PII that is explicitly present as real text, not inside a [PLACEHOLDER].
+- Never reconstruct or infer content that is hidden behind a placeholder.
 - If unsure whether something is PII, do not include it.
 - Return all items, even if there are many. It is OK if items length is 200+.
-- Return {"items": []} only if there is no PII of these types in the text.`;
+- Return {"items": []} only if there is no remaining unredacted PII of these types.`;
 
   const messages: Array<{ role: string; content: string }> = [
     { role: 'system', content: systemPrompt },

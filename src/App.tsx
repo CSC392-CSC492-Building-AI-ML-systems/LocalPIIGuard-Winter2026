@@ -6,6 +6,19 @@ interface Match {
   start: number;
   end: number;
   value: string;
+  source: string;
+}
+
+const SOURCE_COLORS: Record<string, string> = {
+  Regex:           '#fde68a', // amber
+  'Ner (Spacy)':   '#a5f3fc', // cyan
+  LLM:             '#e9d5ff', // purple
+};
+
+const DEFAULT_SOURCE_COLOR = '#fed7aa'; // orange fallback
+
+function sourceColor(source: string): string {
+  return SOURCE_COLORS[source] ?? DEFAULT_SOURCE_COLOR;
 }
 
 interface ScanResult {
@@ -70,7 +83,16 @@ function buildHighlightedPreview(text: string, matches: Match[]): React.ReactNod
     if (m.start > lastEnd) {
       nodes.push(escapeHtml(text.slice(lastEnd, m.start)));
     }
-    nodes.push(<mark key={`${m.start}-${m.end}`}>{escapeHtml(m.value)}</mark>);
+    const color = sourceColor(m.source);
+    nodes.push(
+      <mark
+        key={`${m.start}-${m.end}`}
+        style={{ background: color, borderRadius: 3, padding: '0 2px' }}
+        title={`${m.type} · ${m.source}`}
+      >
+        {escapeHtml(m.value)}
+      </mark>
+    );
     lastEnd = m.end;
   }
   if (lastEnd < text.length) {
@@ -215,7 +237,17 @@ function App() {
                 checked={enabled}
                 onChange={(e) => handleLayerToggle(name, e.target.checked)}
               />
-              <span>{name.toLowerCase().includes('llama') ? 'LLM' : name}</span>
+              <span
+                style={{
+                  background: sourceColor(name),
+                  borderRadius: 3,
+                  padding: '1px 6px',
+                  color: '#111',
+                  opacity: enabled ? 1 : 0.4,
+                }}
+              >
+                {name}
+              </span>
             </label>
           ))}
         </div>
