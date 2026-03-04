@@ -8,12 +8,9 @@ const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 import { RegexDetector } from '../shared/regex-detector'
 import { NerDetector } from '../shared/ner-detector';
 import { LlamaDetector } from '../shared/llm-detector';
-import { GlinerDetector } from '../shared/gliner-detector';
-
 const piiDetector = [
   new RegexDetector(),
   new NerDetector(),
-  new GlinerDetector(),
   new LlamaDetector(),
 ]
 

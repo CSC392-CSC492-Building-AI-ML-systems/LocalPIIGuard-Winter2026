@@ -12,7 +12,6 @@ interface Match {
 const SOURCE_COLORS: Record<string, string> = {
   Regex:           '#fde68a', // amber
   'Ner (Spacy)':   '#a5f3fc', // cyan
-  GLiNER:          '#bbf7d0', // green
   LLM:             '#e9d5ff', // purple
 };
 
