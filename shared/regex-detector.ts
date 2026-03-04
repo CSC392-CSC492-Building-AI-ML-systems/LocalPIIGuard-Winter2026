@@ -74,10 +74,10 @@ const PATTERNS: Array<{ type: PiiType; regex: RegExp }> = [
   },
 
   // Postal codes
-  // US ZIP: 12345, 12345-6789
+  // US ZIP+4 only (plain 5-digit too ambiguous): 12345-6789
   {
     type: PiiType.POSTCODE,
-    regex: /\b\d{5}(?:-\d{4})?\b/g,
+    regex: /\b\d{5}-\d{4}\b/g,
   },
   // Canadian: A1A 1A1 or A1A1A1
   {
@@ -88,6 +88,30 @@ const PATTERNS: Array<{ type: PiiType; regex: RegExp }> = [
   {
     type: PiiType.POSTCODE,
     regex: /\b[A-Za-z]{1,2}\d{1,2}[A-Za-z]?\s*\d[A-Za-z]{2}\b/g,
+  },
+
+  // Social Security Number: 123-45-6789 or 123 45 6789
+  {
+    type: PiiType.SOCIALNUMBER,
+    regex: /\b\d{3}[-\s]\d{2}[-\s]\d{4}\b/g,
+  },
+
+  // IPv6: full and compressed forms
+  {
+    type: PiiType.IPV6,
+    regex: /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b(?:[0-9a-fA-F]{1,4}:)*::(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}\b|\b::(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}\b|\b(?:[0-9a-fA-F]{1,4}:)+:\b/g,
+  },
+
+  // MAC address: AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF or AABBCCDDEEFF
+  {
+    type: PiiType.MAC,
+    regex: /\b(?:[0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}\b/g,
+  },
+
+  // IBAN: up to 34 alphanumeric chars, optional spaces every 4
+  {
+    type: PiiType.IBAN,
+    regex: /\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){2,7}(?:\s?[A-Z0-9]{1,4})?\b/g,
   },
 ];
 

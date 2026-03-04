@@ -20,7 +20,10 @@ const VALID_PII_TYPES = new Set<string>([
   PiiType.EMAIL,
   PiiType.PHONE,
   PiiType.IP,
+  PiiType.IPV6,
+  PiiType.MAC,
   PiiType.CARD,
+  PiiType.IBAN,
   PiiType.NAME,
   PiiType.FIRSTNAME,
   PiiType.LASTNAME,
@@ -41,9 +44,10 @@ const VALID_PII_TYPES = new Set<string>([
 ]);
 
 const PII_TYPE_ENUM = [
-  'EMAIL', 'PHONE', 'IP', 'CARD', 'NAME', 'FIRSTNAME', 'LASTNAME',
-  'LOCATION', 'ORG', 'DATE', 'USERNAME', 'TIME', 'IDCARD', 'COUNTRY',
-  'BUILDING', 'STREET', 'CITY', 'STATE', 'POSTCODE', 'PASS', 'SOCIALNUMBER',
+  'EMAIL', 'PHONE', 'IP', 'IPV6', 'MAC', 'CARD', 'IBAN',
+  'NAME', 'FIRSTNAME', 'LASTNAME', 'LOCATION', 'ORG', 'DATE',
+  'USERNAME', 'TIME', 'IDCARD', 'COUNTRY', 'BUILDING', 'STREET',
+  'CITY', 'STATE', 'POSTCODE', 'PASS', 'SOCIALNUMBER',
 ];
 
 /** JSON schema for chat format: root object with items array. Optional enum restricts labels per pass. */
@@ -270,7 +274,7 @@ async function detectChunk(
   const systemPrompt = `You are a PII scrubbing assistant operating as the final stage of a detection pipeline.
 
 CONTEXT — earlier pipeline stages have already redacted some PII by replacing it with bracketed placeholders. The placeholders you may encounter are:
-[FIRSTNAME] [LASTNAME] [NAME] [EMAIL] [PHONE] [IP] [CARD] [LOCATION] [ORG] [DATE] [TIME] [USERNAME] [IDCARD] [COUNTRY] [BUILDING] [STREET] [CITY] [STATE] [POSTCODE] [PASS] [SOCIALNUMBER]
+[FIRSTNAME] [LASTNAME] [NAME] [EMAIL] [PHONE] [IP] [IPV6] [MAC] [CARD] [IBAN] [LOCATION] [ORG] [DATE] [TIME] [USERNAME] [IDCARD] [COUNTRY] [BUILDING] [STREET] [CITY] [STATE] [POSTCODE] [PASS] [SOCIALNUMBER]
 
 Do NOT return any of these placeholders as matches — they are already redacted.
 
