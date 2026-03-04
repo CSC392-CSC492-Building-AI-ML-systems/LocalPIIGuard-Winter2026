@@ -27,6 +27,7 @@ export interface Match {
   start: number;
   end: number;
   value: string;
+  source: string;
 }
 
 export interface RawMatch {

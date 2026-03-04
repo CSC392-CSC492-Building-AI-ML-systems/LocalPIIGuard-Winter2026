@@ -25,6 +25,70 @@ const PATTERNS: Array<{ type: PiiType; regex: RegExp }> = [
     type: PiiType.CARD,
     regex: /\b(?:\d[-\s]*){12,18}\d\b/g,
   },
+
+  // Dates
+  // ISO 8601: 2024-01-31, 2024/01/31
+  {
+    type: PiiType.DATE,
+    regex: /\b\d{4}[-/]\d{2}[-/]\d{2}\b/g,
+  },
+  // US style: 01/31/2024, 1/5/2024, 01-31-2024
+  {
+    type: PiiType.DATE,
+    regex: /\b(?:0?[1-9]|1[0-2])[-/](?:0?[1-9]|[12]\d|3[01])[-/]\d{4}\b/g,
+  },
+  // European style: 31/01/2024, 31.01.2024, 31-01-2024
+  {
+    type: PiiType.DATE,
+    regex: /\b(?:0?[1-9]|[12]\d|3[01])[.\-/](?:0?[1-9]|1[0-2])[.\-/]\d{4}\b/g,
+  },
+  // Written month: January 31, 2024 | Jan 31, 2024 | 31 January 2024 | 31 Jan 2024
+  {
+    type: PiiType.DATE,
+    regex: /\b(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b/gi,
+  },
+  {
+    type: PiiType.DATE,
+    regex: /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{4}\b/gi,
+  },
+
+  // Times
+  // 12-hour: 3:45 PM, 03:45:12 AM, 3pm
+  {
+    type: PiiType.TIME,
+    regex: /\b(?:0?[1-9]|1[0-2])(?::[0-5]\d){1,2}\s*[AaPp]\.?[Mm]\.?\b/g,
+  },
+  {
+    type: PiiType.TIME,
+    regex: /\b(?:0?[1-9]|1[0-2])\s*[AaPp]\.?[Mm]\.?\b/g,
+  },
+  // 24-hour: 13:45, 09:05:30, 23:59
+  {
+    type: PiiType.TIME,
+    regex: /\b(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\b/g,
+  },
+  // Written: quarter past 3, half past 10, quarter to 5
+  {
+    type: PiiType.TIME,
+    regex: /\b(?:quarter\s+(?:past|to)|half\s+past)\s+(?:0?[1-9]|1[0-2])\b/gi,
+  },
+
+  // Postal codes
+  // US ZIP: 12345, 12345-6789
+  {
+    type: PiiType.POSTCODE,
+    regex: /\b\d{5}(?:-\d{4})?\b/g,
+  },
+  // Canadian: A1A 1A1 or A1A1A1
+  {
+    type: PiiType.POSTCODE,
+    regex: /\b[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d\b/g,
+  },
+  // UK: SW1A 2AA, EC1A 1BB, W1A 0AX, M1 1AE, B1 1BB
+  {
+    type: PiiType.POSTCODE,
+    regex: /\b[A-Za-z]{1,2}\d{1,2}[A-Za-z]?\s*\d[A-Za-z]{2}\b/g,
+  },
 ];
 
 function overlaps(a: RawMatch, b: RawMatch): boolean {
