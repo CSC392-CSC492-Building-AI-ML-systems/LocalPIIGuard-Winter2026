@@ -25,20 +25,12 @@ const VALID_PII_TYPES = new Set<string>([
   PiiType.CARD,
   PiiType.IBAN,
   PiiType.NAME,
-  PiiType.FIRSTNAME,
-  PiiType.LASTNAME,
   PiiType.LOCATION,
   PiiType.ORG,
   PiiType.DATE,
   PiiType.USERNAME,
   PiiType.TIME,
   PiiType.IDCARD,
-  PiiType.COUNTRY,
-  PiiType.BUILDING,
-  PiiType.STREET,
-  PiiType.CITY,
-  PiiType.STATE,
-  PiiType.POSTCODE,
   PiiType.PASS,
   PiiType.SOCIALNUMBER,
 ]);
@@ -49,6 +41,33 @@ const PII_TYPE_ENUM = [
   'USERNAME', 'TIME', 'IDCARD', 'COUNTRY', 'BUILDING', 'STREET',
   'CITY', 'STATE', 'POSTCODE', 'PASS', 'SOCIALNUMBER',
 ];
+
+const PII_TYPE_MAP: Record<string, string> = {
+  EMAIL: PiiType.EMAIL,
+  PHONE: PiiType.PHONE,
+  IP: PiiType.IP,
+  IPV6: PiiType.IPV6,
+  MAC: PiiType.MAC,
+  CARD: PiiType.CARD,
+  IBAN: PiiType.IBAN,
+  NAME: PiiType.NAME,
+  FIRSTNAME: PiiType.NAME,
+  LASTNAME: PiiType.NAME,
+  LOCATION: PiiType.LOCATION,
+  ORG: PiiType.ORG,
+  DATE: PiiType.DATE,
+  USERNAME: PiiType.USERNAME,
+  TIME: PiiType.TIME,
+  IDCARD: PiiType.IDCARD,
+  COUNTRY: PiiType.LOCATION,
+  BUILDING: PiiType.LOCATION,
+  STREET: PiiType.LOCATION,
+  CITY: PiiType.LOCATION,
+  STATE: PiiType.LOCATION,
+  POSTCODE: PiiType.LOCATION,
+  PASS: PiiType.PASS,
+  SOCIALNUMBER: PiiType.SOCIALNUMBER,
+};
 
 /** JSON schema for chat format: root object with items array. Optional enum restricts labels per pass. */
 function getResponseSchema(allowedLabels: string[]): Record<string, unknown> {
@@ -80,9 +99,9 @@ function getResponseSchema(allowedLabels: string[]): Record<string, unknown> {
 function mapType(raw: string): PiiType | null {
   const upper = raw?.toUpperCase?.()?.trim?.();
   if (!upper) return null;
-  if (VALID_PII_TYPES.has(upper)) return upper as PiiType;
+  if (PII_TYPE_MAP[upper]) return PII_TYPE_MAP[upper] as PiiType;
   const base = upper.replace(/\d+$/, '');
-  if (base && VALID_PII_TYPES.has(base)) return base as PiiType;
+  if (base && PII_TYPE_MAP[base]) return PII_TYPE_MAP[base] as PiiType;
   return null;
 }
 
