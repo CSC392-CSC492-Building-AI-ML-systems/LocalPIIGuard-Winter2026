@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, clipboard, Menu } from 'electron';
+﻿import { app, BrowserWindow, ipcMain, clipboard, Menu } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import path from 'path';
 import {
@@ -10,12 +10,13 @@ import {
 import type { PiiType } from '../shared/types';
 import { RegexDetector } from '../shared/regex-detector';
 import { NerDetector } from '../shared/ner-detector';
+import { SpancatDetector } from '../shared/spancat-detector';
 import { LlamaDetector } from '../shared/llm-detector';
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 const PII_DEBUG = /^1|true|yes$/i.test(process.env.PII_DEBUG ?? '');
 
-const piiDetectors = [new RegexDetector(), new NerDetector(), new LlamaDetector()];
+const piiDetectors = [new RegexDetector(), new NerDetector(), new LlamaDetector(), new SpancatDetector];
 
 type LayerState = Record<string, boolean>;
 const layerState: LayerState = Object.fromEntries(
