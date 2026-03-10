@@ -123,6 +123,61 @@ function buildHighlightedPreview(text: string, matches: Match[]): React.ReactNod
   return nodes;
 }
 
+function buildRedactedPreview(
+  text: string,
+  matches: Match[],
+  revealedIndices: Set<number>,
+  onToggle: (index: number) => void
+): React.ReactNode[] {
+  if (!text || matches.length === 0) return [text || ''];
+
+  const sorted = matches
+    .map((m, i) => ({ ...m, originalIndex: i }))
+    .sort((a, b) => a.start - b.start);
+
+  const nodes: React.ReactNode[] = [];
+  let lastEnd = 0;
+
+  for (const m of sorted) {
+    if (m.start > lastEnd) {
+      nodes.push(text.slice(lastEnd, m.start));
+    }
+
+    const revealed = revealedIndices.has(m.originalIndex);
+    if (revealed) {
+      nodes.push(
+        <span
+          key={`${m.originalIndex}-revealed`}
+          className="redacted-revealed"
+          onClick={() => onToggle(m.originalIndex)}
+          title={`${m.type} | ${m.source} — click to re-redact`}
+        >
+          {m.value}
+        </span>
+      );
+    } else {
+      nodes.push(
+        <span
+          key={`${m.originalIndex}-tag`}
+          className="redacted-tag"
+          onClick={() => onToggle(m.originalIndex)}
+          title={`${m.type} | ${m.source} — click to reveal`}
+        >
+          [{m.type}]
+        </span>
+      );
+    }
+
+    lastEnd = m.end;
+  }
+
+  if (lastEnd < text.length) {
+    nodes.push(text.slice(lastEnd));
+  }
+
+  return nodes;
+}
+
 function loadTermList(storageKey: string): string[] {
   if (typeof window === 'undefined') return [];
 
@@ -148,6 +203,7 @@ function App() {
   const [input, setInput] = useState('');
   const [redacted, setRedacted] = useState('');
   const [matches, setMatches] = useState<Match[]>([]);
+  const [revealedMatches, setRevealedMatches] = useState<Set<number>>(new Set());
   const [elapsedMs, setElapsedMs] = useState<number | undefined>(undefined);
   const [llmTokens, setLlmTokens] = useState<number | undefined>(undefined);
   const [llmElapsedMs, setLlmElapsedMs] = useState<number | undefined>(undefined);
@@ -160,6 +216,7 @@ function App() {
   const [allowlist, setAllowlist] = useState<string[]>(() => loadTermList(ALLOWLIST_STORAGE_KEY));
   const [blacklist, setBlacklist] = useState<string[]>(() => loadTermList(BLACKLIST_STORAGE_KEY));
   const [layerState, setLayerState] = useState<LayerState>({});
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string } | null>(null);
 
   useEffect(() => {
     try {
@@ -246,6 +303,7 @@ function App() {
       });
       setRedacted(result.redactedText);
       setMatches(result.matches);
+      setRevealedMatches(new Set());
       setElapsedMs(result.elapsedMs);
       setLlmTokens(result.llmTokens);
       setLlmElapsedMs(result.llmElapsedMs);
@@ -339,15 +397,68 @@ function App() {
     [handleAddBlacklist]
   );
 
-  const detectedTypes = [...new Set(matches.map((m) => m.type))];
-  const previewNodes = buildHighlightedPreview(input, matches);
-  const layerEntries = Object.entries(layerState).sort(([a], [b]) =>
-    a.localeCompare(b)
+  const toggleReveal = useCallback((index: number) => {
+    setRevealedMatches((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleTextareaContextMenu = useCallback(
+    (e: React.MouseEvent<HTMLTextAreaElement>) => {
+      const textarea = e.currentTarget;
+      const selected = textarea.value
+        .slice(textarea.selectionStart, textarea.selectionEnd)
+        .trim();
+      if (!selected) return;
+      e.preventDefault();
+      setContextMenu({ x: e.clientX, y: e.clientY, text: selected });
+    },
+    []
   );
+
+  const addSelectedToBlacklist = useCallback(() => {
+    if (!contextMenu) return;
+    const term = contextMenu.text;
+    setBlacklist((current) => {
+      if (current.some((e) => e.toLowerCase() === term.toLowerCase())) return current;
+      return [...current, term];
+    });
+    setContextMenu(null);
+  }, [contextMenu]);
+
+  const addSelectedToAllowlist = useCallback(() => {
+    if (!contextMenu) return;
+    const term = contextMenu.text;
+    setAllowlist((current) => {
+      if (current.some((e) => e.toLowerCase() === term.toLowerCase())) return current;
+      return [...current, term];
+    });
+    setContextMenu(null);
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [contextMenu]);
 
   const handleLayerToggle = useCallback((name: string, enabled: boolean) => {
     void window.pii?.setLayer?.(name, enabled);
   }, []);
+
+  const detectedTypes = [...new Set(matches.map((m) => m.type))];
+  const previewNodes = buildHighlightedPreview(input, matches);
+  const redactedPreviewNodes = buildRedactedPreview(input, matches, revealedMatches, toggleReveal);
+  const layerEntries = Object.entries(layerState).sort(([a], [b]) =>
+    a.localeCompare(b)
+  );
 
   return (
     <div className="app">
@@ -501,20 +612,49 @@ function App() {
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onContextMenu={handleTextareaContextMenu}
             placeholder="Paste text containing PII here..."
             spellCheck={false}
           />
         </div>
         <div className="pane">
           <label>Redacted Output</label>
-          <textarea
-            value={redacted}
-            readOnly
-            placeholder="Click Scan to see redacted text..."
-            spellCheck={false}
-          />
+          {matches.length > 0 ? (
+            <div
+              className="redacted-preview"
+              onContextMenu={(e) => {
+                const selected = window.getSelection()?.toString().trim() ?? '';
+                if (!selected) return;
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, text: selected });
+              }}
+            >
+              {redactedPreviewNodes}
+            </div>
+          ) : (
+            <textarea
+              value={redacted}
+              readOnly
+              onContextMenu={handleTextareaContextMenu}
+              placeholder="Click Scan to see redacted text..."
+              spellCheck={false}
+            />
+          )}
         </div>
       </div>
+
+      {contextMenu && (
+        <div
+          className="context-menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-label">"{contextMenu.text}"</div>
+          <button type="button" onClick={addSelectedToBlacklist}>Add to Blacklist</button>
+          <button type="button" onClick={addSelectedToAllowlist}>Add to Whitelist</button>
+          <button type="button" onClick={() => setContextMenu(null)}>Cancel</button>
+        </div>
+      )}
 
       <div className="preview-section">
         <label
