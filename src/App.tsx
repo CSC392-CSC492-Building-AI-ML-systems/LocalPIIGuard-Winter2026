@@ -6,6 +6,7 @@ interface Match {
   end: number;
   value: string;
   source: string;
+  confidence: number;
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -13,6 +14,8 @@ const SOURCE_COLORS: Record<string, string> = {
   'Ner (Spacy)': '#a5f3fc',
   LLM: '#e9d5ff',
   Manual: '#fecaca',
+  'Presidio': '#11f3fc',
+  
 };
 
 const DEFAULT_SOURCE_COLOR = '#fed7aa';

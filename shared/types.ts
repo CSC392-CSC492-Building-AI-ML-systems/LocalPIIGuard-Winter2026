@@ -1,4 +1,4 @@
-export enum PiiType {
+﻿export enum PiiType {
   EMAIL = "EMAIL",
   PHONE = "PHONE",
   IP = "IP",
@@ -32,6 +32,7 @@ export interface Match {
   end: number;
   value: string;
   source: string;
+  confidence?: number;
 }
 
 export interface RawMatch {
@@ -41,6 +42,7 @@ export interface RawMatch {
   value: string;
   source: string;
   label?: string;
+  confidence?: number;
 }
 
 export interface ScanResult {

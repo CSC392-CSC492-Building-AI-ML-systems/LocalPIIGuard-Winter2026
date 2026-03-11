@@ -1,8 +1,6 @@
 import json
 import sys
-
 import spacy
-
 
 def main() -> None:
     text = sys.stdin.read()
@@ -18,6 +16,7 @@ def main() -> None:
         for ent in doc.ents
     ]
     sys.stdout.write(json.dumps(entities, ensure_ascii=True))
+    sys.stdout.flush()
 
 
 if __name__ == '__main__':
