@@ -2,15 +2,28 @@
   EMAIL = "EMAIL",
   PHONE = "PHONE",
   IP = "IP",
+  IPV6 = "IPV6",
+  MAC = "MAC",
   CARD = "CARD",
+  IBAN = "IBAN",
   NAME = "NAME",
+  FIRSTNAME = "FIRSTNAME",
+  LASTNAME = "LASTNAME",
   LOCATION = "LOCATION",
   ORG = "ORG",
-  DATE = "DATE", 
-  FINANCIAL = "FINANCIAL", 
-  MISC = "MISC", 
-  ID = "ID", 
-  URL = "URL"
+  DATE = "DATE",
+  USERNAME = "USERNAME",
+  TIME = "TIME",
+  IDCARD = "IDCARD",
+  COUNTRY = "COUNTRY",
+  BUILDING = "BUILDING",
+  STREET = "STREET",
+  CITY = "CITY",
+  STATE = "STATE",
+  POSTCODE = "POSTCODE",
+  PASS = "PASS",
+  SOCIALNUMBER = "SOCIALNUMBER",
+  BLACKLIST = "BLACKLIST",
 }
 
 export interface Match {
@@ -18,6 +31,7 @@ export interface Match {
   start: number;
   end: number;
   value: string;
+  source: string;
 }
 
 export interface RawMatch {
@@ -26,11 +40,18 @@ export interface RawMatch {
   end: number;
   value: string;
   source: string;
+  label?: string;
 }
 
 export interface ScanResult {
   redactedText: string;
   matches: Match[];
+  /** Time taken for the scan in milliseconds (for UI display). */
+  elapsedMs?: number;
+  /** LLM output token count (when LLM detector was used). */
+  llmTokens?: number;
+  /** LLM-only elapsed time in ms (for tokens/s and ms/token). */
+  llmElapsedMs?: number;
 }
 
 export interface PIIDetector {
