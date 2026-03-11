@@ -17,6 +17,11 @@ Install this for the spaCy NER layer:
 python -m pip install -r scripts/requirements-spacy.txt
 python -m spacy download en_core_web_sm
 ```
+Optional - For the Presidio layer: 
+```bash
+pip install presidio_analyzer
+python -m spacy download en_core_web_lg
+```
 
 Optional — for the **LLM** detector layer:
 
