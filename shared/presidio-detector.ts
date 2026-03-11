@@ -17,19 +17,17 @@ type PresidioEntity = {
 
 const LABEL_MAP: Record<string, PiiType> = {
   'CREDIT_CARD': PiiType.CARD,
-  'CRYPTO': PiiType.FINANCIAL,
+  'CRYPTO': PiiType.CARD,
   'DATE_TIME': PiiType.DATE,
   'EMAIL_ADDRESS': PiiType.EMAIL,
-  'IBAN_CODE': PiiType.FINANCIAL,
+  'IBAN_CODE': PiiType.IBAN,
   'IP_ADDRESS': PiiType.IP,
   'LOCATION': PiiType.LOCATION,
-  'NRP' : PiiType.MISC,
   'PERSON': PiiType.NAME,
   'PHONE_NUMBER': PiiType.PHONE,
-  'US_SSN': PiiType.ID, // Added common Presidio types
-  'UK_NHS': PiiType.ID,
-  'MEDICAL_LICENSE': PiiType.MISC,
-  'URL': PiiType.URL
+  'US_SSN': PiiType.SOCIALNUMBER, // Added common Presidio types
+  'UK_NHS': PiiType.SOCIALNUMBER,
+  'MEDICAL_LICENSE': PiiType.IDCARD,
 }; 
 
 export class PresidioDetector implements PIIDetector {
