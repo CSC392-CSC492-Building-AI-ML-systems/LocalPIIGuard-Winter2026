@@ -8,11 +8,11 @@ import { PiiType } from './types';
 const PII_DEBUG = /^1|true|yes$/i.test(process.env.PII_DEBUG ?? '');
 
 function log(...args: unknown[]): void {
-  console.log('[PII NER]', ...args);
+  console.log('[PII SPANCAT]', ...args);
 }
 function debug(...args: unknown[]): void {
   if (PII_DEBUG) {
-    console.log('[PII NER]', ...args);
+    console.log('[PII SPANCAT]', ...args);
   }
 }
 
@@ -21,6 +21,7 @@ type SpacyEntity = {
   end: number;
   label: string;
   text: string;
+  confidence: number;
 };
 
 const LABEL_MAP: Record<string, PiiType> = {
@@ -110,6 +111,7 @@ export class SpancatDetector implements PIIDetector {
                 end: entity.end,
                 value: entity.text,
                 source: this.getName(),
+                confidence: entity.confidence
             });
             return acc;
             }, []);
