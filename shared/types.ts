@@ -14,7 +14,7 @@ export enum PiiType {
   DATE = "DATE",
   USERNAME = "USERNAME",
   TIME = "TIME",
-  IDCARD = "IDCARD",
+  ID = "ID",
   COUNTRY = "COUNTRY",
   BUILDING = "BUILDING",
   STREET = "STREET",
@@ -32,6 +32,8 @@ export interface Match {
   end: number;
   value: string;
   source: string;
+  /** LLM token-logprob confidence in [0, 1]. Only present for LLM-sourced matches. */
+  confidence?: number;
 }
 
 export interface RawMatch {
@@ -41,6 +43,8 @@ export interface RawMatch {
   value: string;
   source: string;
   label?: string;
+  /** LLM token-logprob confidence in [0, 1]. Only present for LLM-sourced matches. */
+  confidence?: number;
 }
 
 export interface ScanResult {

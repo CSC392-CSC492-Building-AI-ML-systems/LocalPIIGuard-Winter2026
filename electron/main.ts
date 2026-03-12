@@ -210,7 +210,7 @@ ipcMain.handle('pii:scan', async (_event, payload: ScanPayload) => {
   }
 
   let currentText = input;
-  const allDetections: Array<{ value: string; source: string; type: PiiType }> = [];
+  const allDetections: Array<{ value: string; source: string; type: PiiType; confidence?: number }> = [];
 
   const manualMatches = applyAllowlist(
     currentText,
@@ -236,7 +236,7 @@ ipcMain.handle('pii:scan', async (_event, payload: ScanPayload) => {
     }
 
     for (const m of matches) {
-      allDetections.push({ value: m.value, source: m.source, type: m.type });
+      allDetections.push({ value: m.value, source: m.source, type: m.type, confidence: m.confidence });
     }
     currentText = maskText(currentText, matches);
   }

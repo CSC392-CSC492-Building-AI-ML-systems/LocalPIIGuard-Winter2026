@@ -28,12 +28,12 @@ export function maskText(text: string, rawMatches: RawMatch[]): string {
  */
 export function reconstructMatches(
   originalText: string,
-  detections: Array<{ value: string; source: string; type: PiiType }>
+  detections: Array<{ value: string; source: string; type: PiiType; confidence?: number }>
 ): Match[] {
   const matches: Match[] = [];
-  for (const { value, source, type } of detections) {
+  for (const { value, source, type, confidence } of detections) {
     for (const { start, end } of findOccurrences(originalText, value)) {
-      matches.push({ type, start, end, value, source });
+      matches.push({ type, start, end, value, source, confidence });
     }
   }
   matches.sort((a, b) => a.start - b.start);

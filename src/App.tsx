@@ -6,6 +6,7 @@ interface Match {
   end: number;
   value: string;
   source: string;
+  confidence?: number;
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -104,13 +105,29 @@ function buildHighlightedPreview(text: string, matches: Match[]): React.ReactNod
       nodes.push(escapeHtml(text.slice(lastEnd, m.start)));
     }
     const color = sourceColor(m.source);
+    const confidencePct = m.confidence != null ? Math.round(m.confidence * 100) : null;
+    const tooltipParts = [m.type, m.source];
+    if (confidencePct != null) tooltipParts.push(`confidence ${confidencePct}%`);
     nodes.push(
       <mark
         key={`${m.start}-${m.end}`}
-        style={{ background: color, borderRadius: 3, padding: '0 2px' }}
-        title={`${m.type} | ${m.source}`}
+        style={{ background: color, borderRadius: 3, padding: '0 2px', position: 'relative' }}
+        title={tooltipParts.join(' · ')}
       >
         {escapeHtml(m.value)}
+        {confidencePct != null && (
+          <sup
+            style={{
+              fontSize: '0.65em',
+              fontWeight: 600,
+              marginLeft: 2,
+              opacity: 0.75,
+              letterSpacing: 0,
+            }}
+          >
+            {confidencePct}%
+          </sup>
+        )}
       </mark>
     );
     lastEnd = m.end;
