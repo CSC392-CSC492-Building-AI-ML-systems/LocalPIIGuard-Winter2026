@@ -96,7 +96,7 @@ ipcMain.handle('pii:scan', async (_event, text: string) => {
 
   // Pipeline: run detectors sequentially, each on the masked output of the previous
   let currentText = input;
-  const allDetections: Array<{ value: string; source: string; type: PiiType }> = [];
+  const allDetections: Array<{ value: string; source: string; type: PiiType; confidence?: number }> = [];
 
   for (const detector of activeDetectors) {
     const matches = await detector.collectMatches(currentText);
@@ -104,7 +104,7 @@ ipcMain.handle('pii:scan', async (_event, text: string) => {
       console.log('[PII scan]', detector.getName(), 'matches:', matches.length, matches.slice(0, 3));
     }
     for (const m of matches) {
-      allDetections.push({ value: m.value, source: m.source, type: m.type });
+      allDetections.push({ value: m.value, source: m.source, type: m.type, confidence: m.confidence });
     }
     currentText = maskText(currentText, matches);
   }
