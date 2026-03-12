@@ -402,7 +402,8 @@ Rules:
     }
 
     const data = (await res.json()) as {
-      message?: { content?: unknown; logprobs?: unknown };
+      message?: { content?: unknown };
+      logprobs?: unknown;
       eval_count?: number;
     };
     const evalCount = typeof data?.eval_count === 'number' ? data.eval_count : 0;
@@ -410,10 +411,10 @@ Rules:
     const responseText = typeof content === 'string' ? content : content != null ? String(content) : '';
 
     // Extract logprob tokens if the model returned them.
-    // Ollama may return logprobs as message.logprobs (array of {token, logprob} objects)
-    // or in other nested shapes — we handle both defensively.
+    // Ollama returns logprobs as a top-level array of {token, logprob, bytes} objects.
+    // We also handle the wrapped {content: [{token, logprob}]} shape defensively.
     let logprobTokens: LogprobToken[] | undefined;
-    const rawLogprobs = data?.message?.logprobs;
+    const rawLogprobs = data?.logprobs;
     if (Array.isArray(rawLogprobs)) {
       logprobTokens = (rawLogprobs as unknown[]).flatMap((entry) => {
         if (entry == null || typeof entry !== 'object') return [];
