@@ -10,15 +10,21 @@ def main() -> None:
     
     nlp = spacy.load(model_path)
     doc = nlp(text)
-    spans = doc.spans.get(SPANS_KEY, [])
+    span_group = doc.spans.get(SPANS_KEY, [])
+
+    scores = []
+    if hasattr(span_group, 'attrs') and 'scores' in span_group.attrs:
+        scores = span_group.attrs['scores']
+
     entities = [
         {
             'start': span.start_char,
             'end': span.end_char,
             'label': span.label_,
-            'text': span.text,        
-            }
-        for span in spans
+            'text': span.text,
+            'score': float(scores[i]) if i < len(scores) else None,
+        }
+        for i, span in enumerate(span_group)
     ]
     sys.stdout.write(json.dumps(entities, ensure_ascii=True))
 

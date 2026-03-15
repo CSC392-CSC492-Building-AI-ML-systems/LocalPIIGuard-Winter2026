@@ -32,7 +32,7 @@ export interface Match {
   end: number;
   value: string;
   source: string;
-  confidence?: number;
+  score?: number | null;
 }
 
 export interface RawMatch {
@@ -42,7 +42,7 @@ export interface RawMatch {
   value: string;
   source: string;
   label?: string;
-  confidence?: number;
+  score?: number | null;
 }
 
 export interface ScanResult {

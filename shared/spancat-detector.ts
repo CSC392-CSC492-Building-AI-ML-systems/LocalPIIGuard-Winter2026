@@ -21,7 +21,7 @@ type SpacyEntity = {
   end: number;
   label: string;
   text: string;
-  confidence: number;
+  score: number | null;
 };
 
 const LABEL_MAP: Record<string, PiiType> = {
@@ -111,7 +111,7 @@ export class SpancatDetector implements PIIDetector {
                 end: entity.end,
                 value: entity.text,
                 source: this.getName(),
-                confidence: entity.confidence
+                score: entity.score ?? null,
             });
             return acc;
             }, []);
@@ -134,4 +134,3 @@ export class SpancatDetector implements PIIDetector {
   }
 
 }
-

@@ -212,24 +212,20 @@ ipcMain.handle('pii:scan', async (_event, payload: ScanPayload) => {
     });
   }
 
-  let currentText = input;
-  const allDetections: Array<{ value: string; source: string; type: PiiType , confidence?: number}> = [];
+  const allDetections: Array<{ value: string; source: string; type: PiiType; score?: number | null }> = [];
 
   const manualMatches = applyAllowlist(
-    currentText,
-    collectManualMatches(currentText, blacklist),
+    input,
+    collectManualMatches(input, blacklist),
     allowlist
   );
-  if (manualMatches.length > 0) {
-    for (const m of manualMatches) {
-      allDetections.push({ value: m.value, source: m.source, type: m.type , confidence: m.confidence});
-    }
-    currentText = maskText(currentText, manualMatches);
+  for (const m of manualMatches) {
+    allDetections.push({ value: m.value, source: m.source, type: m.type, score: m.score });
   }
 
   for (const detector of activeDetectors) {
-    const rawMatches = await detector.collectMatches(currentText);
-    const matches = applyAllowlist(currentText, rawMatches, allowlist);
+    const rawMatches = await detector.collectMatches(input);
+    const matches = applyAllowlist(input, rawMatches, allowlist);
 
     if (PII_DEBUG) {
       console.log('[PII scan]', detector.getName(), {
@@ -239,13 +235,13 @@ ipcMain.handle('pii:scan', async (_event, payload: ScanPayload) => {
     }
 
     for (const m of matches) {
-      allDetections.push({ value: m.value, source: m.source, type: m.type , confidence: m.confidence});
+      allDetections.push({ value: m.value, source: m.source, type: m.type, score: m.score });
     }
-    currentText = maskText(currentText, matches);
   }
 
   const finalMatches = reconstructMatches(input, allDetections);
-  const result = { redactedText: currentText, matches: finalMatches };
+  const redactedText = maskText(input, finalMatches);
+  const result = { redactedText, matches: finalMatches };
   const elapsedMs = Date.now() - startMs;
   const llama = activeDetectors.find((detector) => detector.getName() === 'LLM');
   const llmTokens =
