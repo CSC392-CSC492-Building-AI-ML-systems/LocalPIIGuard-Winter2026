@@ -99,7 +99,7 @@ export class NerDetector implements PIIDetector {
                 end: entity.end,
                 value: entity.text,
                 source: this.getName(),
-                confidence: 0
+                score: undefined
             });
             return acc;
             }, []);
@@ -122,4 +122,3 @@ export class NerDetector implements PIIDetector {
   }
 
 }
-

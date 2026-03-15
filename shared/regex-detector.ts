@@ -155,7 +155,7 @@ export class RegexDetector implements PIIDetector {
           end: m.index + m[0].length,
           value: m[0],
           source: this.getName(),
-          confidence: 1
+          score: 1
         });
       }
     }
