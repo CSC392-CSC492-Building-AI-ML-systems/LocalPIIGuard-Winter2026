@@ -16,6 +16,63 @@ function debug(...args: unknown[]): void {
 
 type OllamaPiiItem = { value: string; label: string };
 
+/** A single token entry from Ollama's logprobs array. */
+type LogprobToken = { token: string; logprob: number };
+
+/**
+ * Compute a confidence score for a specific PII value by finding the tokens
+ * that generated it in the JSON output and averaging their log-probabilities.
+ *
+ * Strategy:
+ *  1. Reconstruct the full generated text by concatenating all tokens.
+ *  2. Find the value string within the context of a JSON "value":"..." pair.
+ *  3. Build a char-to-token-index map and collect the token indices
+ *     that cover the value string characters.
+ *  4. Return exp(mean logprob) — the geometric mean of per-token probabilities.
+ *
+ * Returns undefined if logprobs are unavailable or the value cannot be located.
+ */
+function computeConfidence(tokens: LogprobToken[], valueStr: string): number | undefined {
+  if (!tokens || tokens.length === 0 || !valueStr) return undefined;
+
+  // Reconstruct full generated text from token strings
+  const fullText = tokens.map((t) => t.token).join('');
+
+  // Build char-to-token-index map
+  const charToTokenIdx: number[] = new Array(fullText.length);
+  let charPos = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    for (let j = 0; j < tokens[i].token.length; j++) {
+      charToTokenIdx[charPos++] = i;
+    }
+  }
+
+  // Try to locate the value inside a JSON "value":"<valueStr>" pattern first,
+  // then fall back to the first quoted occurrence.
+  const jsonPattern = `"value":"${valueStr}"`;
+  const jsonIdx = fullText.indexOf(jsonPattern);
+  let valueStart: number;
+  if (jsonIdx !== -1) {
+    valueStart = jsonIdx + '"value":"'.length;
+  } else {
+    const quotedIdx = fullText.indexOf(`"${valueStr}"`);
+    if (quotedIdx === -1) return undefined;
+    valueStart = quotedIdx + 1;
+  }
+  const valueEnd = valueStart + valueStr.length;
+
+  // Collect unique token indices that cover the value characters
+  const tokenIndices = new Set<number>();
+  for (let i = valueStart; i < valueEnd && i < charToTokenIdx.length; i++) {
+    tokenIndices.add(charToTokenIdx[i]);
+  }
+  if (tokenIndices.size === 0) return undefined;
+
+  // Geometric mean of per-token probabilities: exp(mean of logprobs)
+  const sum = [...tokenIndices].reduce((acc, idx) => acc + tokens[idx].logprob, 0);
+  return Math.exp(sum / tokenIndices.size);
+}
+
 const VALID_PII_TYPES = new Set<string>([
   PiiType.EMAIL,
   PiiType.PHONE,
@@ -38,7 +95,7 @@ const VALID_PII_TYPES = new Set<string>([
 const PII_TYPE_ENUM = [
   'EMAIL', 'PHONE', 'IP', 'IPV6', 'MAC', 'CARD', 'IBAN',
   'NAME', 'FIRSTNAME', 'LASTNAME', 'LOCATION', 'ORG', 'DATE',
-  'USERNAME', 'TIME', 'IDCARD', 'COUNTRY', 'BUILDING', 'STREET',
+  'USERNAME', 'TIME', 'ID', 'COUNTRY', 'BUILDING', 'STREET',
   'CITY', 'STATE', 'POSTCODE', 'PASS', 'SOCIALNUMBER',
 ];
 
@@ -58,7 +115,7 @@ const PII_TYPE_MAP: Record<string, string> = {
   DATE: PiiType.DATE,
   USERNAME: PiiType.USERNAME,
   TIME: PiiType.TIME,
-  IDCARD: PiiType.IDCARD,
+  ID: PiiType.IDCARD,
   COUNTRY: PiiType.LOCATION,
   BUILDING: PiiType.LOCATION,
   STREET: PiiType.LOCATION,
@@ -255,7 +312,7 @@ const FEW_SHOT_2_USER = 'Card: KB90324ER\n Country: GB\n Building: 163\n Street:
 
 const FEW_SHOT_2_ASSISTANT = JSON.stringify({
   items: [
-    { value: 'KB90324ER', label: 'IDCARD' },
+    { value: 'KB90324ER', label: 'ID' },
     { value: 'GB', label: 'COUNTRY' },
     { value: '163', label: 'BUILDING' },
     { value: 'Conygre Grove', label: 'STREET' },
@@ -267,7 +324,7 @@ const FEW_SHOT_2_ASSISTANT = JSON.stringify({
     { value: 'Palmoso', label: 'LASTNAME' },
     { value: 'blerenbaasgara@gmail.com', label: 'EMAIL' },
     { value: '107-393-9036', label: 'SOCIALNUMBER' },
-    { value: 'SC78428CU', label: 'IDCARD' },
+    { value: 'SC78428CU', label: 'ID' },
     { value: 'United Kingdom', label: 'COUNTRY' },
     { value: '646', label: 'BUILDING' },
     { value: 'School Lane', label: 'STREET' },
@@ -293,7 +350,7 @@ async function detectChunk(
   const systemPrompt = `You are a PII scrubbing assistant operating as the final stage of a detection pipeline.
 
 CONTEXT — earlier pipeline stages have already redacted some PII by replacing it with bracketed placeholders. The placeholders you may encounter are:
-[FIRSTNAME] [LASTNAME] [NAME] [EMAIL] [PHONE] [IP] [IPV6] [MAC] [CARD] [IBAN] [LOCATION] [ORG] [DATE] [TIME] [USERNAME] [IDCARD] [COUNTRY] [BUILDING] [STREET] [CITY] [STATE] [POSTCODE] [PASS] [SOCIALNUMBER]
+[FIRSTNAME] [LASTNAME] [NAME] [EMAIL] [PHONE] [IP] [IPV6] [MAC] [CARD] [IBAN] [LOCATION] [ORG] [DATE] [TIME] [USERNAME] [ID] [COUNTRY] [BUILDING] [STREET] [CITY] [STATE] [POSTCODE] [PASS] [SOCIALNUMBER]
 
 Do NOT return any of these placeholders as matches — they are already redacted.
 
@@ -345,6 +402,7 @@ Rules:
         stream: false,
         format: getResponseSchema(allowedLabels),
         messages,
+        logprobs: true,
         options: {
           temperature: 0,
           top_p: 0,
@@ -364,11 +422,42 @@ Rules:
 
     const data = (await res.json()) as {
       message?: { content?: unknown };
+      logprobs?: unknown;
       eval_count?: number;
     };
     const evalCount = typeof data?.eval_count === 'number' ? data.eval_count : 0;
     const content = data?.message?.content;
     const responseText = typeof content === 'string' ? content : content != null ? String(content) : '';
+
+    // Extract logprob tokens if the model returned them.
+    // Ollama returns logprobs as a top-level array of {token, logprob, bytes} objects.
+    // We also handle the wrapped {content: [{token, logprob}]} shape defensively.
+    let logprobTokens: LogprobToken[] | undefined;
+    const rawLogprobs = data?.logprobs;
+    if (Array.isArray(rawLogprobs)) {
+      logprobTokens = (rawLogprobs as unknown[]).flatMap((entry) => {
+        if (entry == null || typeof entry !== 'object') return [];
+        const e = entry as Record<string, unknown>;
+        // Handle flat {token, logprob} entries
+        if (typeof e.token === 'string' && typeof e.logprob === 'number') {
+          return [{ token: e.token, logprob: e.logprob }];
+        }
+        // Handle wrapped {content: [{token, logprob}]} shape
+        if (Array.isArray(e.content)) {
+          return (e.content as unknown[]).flatMap((c) => {
+            if (c == null || typeof c !== 'object') return [];
+            const ce = c as Record<string, unknown>;
+            if (typeof ce.token === 'string' && typeof ce.logprob === 'number') {
+              return [{ token: ce.token, logprob: ce.logprob }];
+            }
+            return [];
+          });
+        }
+        return [];
+      });
+      if (logprobTokens.length === 0) logprobTokens = undefined;
+    }
+    debug('logprobs', { available: logprobTokens != null, tokenCount: logprobTokens?.length ?? 0 });
 
     let items: OllamaPiiItem[];
     try {
@@ -395,6 +484,7 @@ Rules:
       ) {
         occurrences = findOccurrencesNormalized(chunk.text, value);
       }
+      const confidence = logprobTokens != null ? computeConfidence(logprobTokens, value) : undefined;
       for (const { start, end, value: spanValue } of occurrences) {
         rawMatches.push({
           type,
@@ -403,6 +493,7 @@ Rules:
           value: spanValue,
           source: sourceName,
           label,
+          confidence,
         });
       }
     }
