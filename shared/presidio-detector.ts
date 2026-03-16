@@ -27,7 +27,7 @@ const LABEL_MAP: Record<string, PiiType> = {
   'PHONE_NUMBER': PiiType.PHONE,
   'US_SSN': PiiType.SOCIALNUMBER, // Added common Presidio types
   'UK_NHS': PiiType.SOCIALNUMBER,
-  'MEDICAL_LICENSE': PiiType.IDCARD,
+  'MEDICAL_LICENSE': PiiType.ID,
 }; 
 
 export class PresidioDetector implements PIIDetector {

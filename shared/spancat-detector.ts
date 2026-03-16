@@ -37,7 +37,7 @@ const LABEL_MAP: Record<string, PiiType> = {
   USERNAME: PiiType.USERNAME,
   PASSWORD: PiiType.PASS,
   SSN: PiiType.SOCIALNUMBER,
-  ID_NUMBER: PiiType.IDCARD,
+  ID_NUMBER: PiiType.ID,
   CREDIT_CARD: PiiType.CARD,
   DATE_OF_BIRTH: PiiType.DATE,
 

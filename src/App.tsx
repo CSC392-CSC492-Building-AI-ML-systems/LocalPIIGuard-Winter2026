@@ -169,61 +169,6 @@ function buildHighlightedPreview(text: string, matches: Match[]): React.ReactNod
 }
 
 
-function buildRedactedPreview(
-  text: string,
-  matches: Match[],
-  revealedIndices: Set<number>,
-  onToggle: (index: number) => void
-): React.ReactNode[] {
-  if (!text || matches.length === 0) return [text || ''];
-
-  const sorted = matches
-    .map((m, i) => ({ ...m, originalIndex: i }))
-    .sort((a, b) => a.start - b.start);
-
-  const nodes: React.ReactNode[] = [];
-  let lastEnd = 0;
-
-  for (const m of sorted) {
-    if (m.start > lastEnd) {
-      nodes.push(text.slice(lastEnd, m.start));
-    }
-    const color = sourceColor(m.source);
-    const confidencePct = m.confidence != null ? Math.round(m.confidence * 100) : null;
-    const tooltipParts = [m.type, m.source];
-    if (confidencePct != null) tooltipParts.push(`confidence ${confidencePct}%`);
-    nodes.push(
-      <mark
-        key={`${m.start}-${m.end}`}
-        style={{ background: color, borderRadius: 3, padding: '0 2px', position: 'relative' }}
-        title={tooltipParts.join(' · ')}
-      >
-        {escapeHtml(m.value)}
-        {confidencePct != null && (
-          <sup
-            style={{
-              fontSize: '0.65em',
-              fontWeight: 600,
-              marginLeft: 2,
-              opacity: 0.75,
-              letterSpacing: 0,
-            }}
-          >
-            {confidencePct}%
-          </sup>
-        )}
-      </mark>
-    );
-    lastEnd = m.end;
-  }
-
-  if (lastEnd < text.length) {
-    nodes.push(escapeHtml(text.slice(lastEnd)));
-  }
-
-  return nodes;
-}
-
 function isWordChar(c: string | undefined): boolean {
   return !!c && /[A-Za-z0-9_]/.test(c);
 }
@@ -291,60 +236,60 @@ function buildRedactedString(text: string, matches: Match[]): string {
   return result;
 }
 
-function buildRedactedPreview(
-  text: string,
-  matches: Match[],
-  revealedIndices: Set<number>,
-  onToggle: (index: number) => void
-): React.ReactNode[] {
-  if (!text || matches.length === 0) return [text || ''];
+// function buildRedactedPreview(
+//   text: string,
+//   matches: Match[],
+//   revealedIndices: Set<number>,
+//   onToggle: (index: number) => void
+// ): React.ReactNode[] {
+//   if (!text || matches.length === 0) return [text || ''];
 
-  const sorted = matches
-    .map((m, i) => ({ ...m, originalIndex: i }))
-    .sort((a, b) => a.start - b.start);
+//   const sorted = matches
+//     .map((m, i) => ({ ...m, originalIndex: i }))
+//     .sort((a, b) => a.start - b.start);
 
-  const nodes: React.ReactNode[] = [];
-  let lastEnd = 0;
+//   const nodes: React.ReactNode[] = [];
+//   let lastEnd = 0;
 
-  for (const m of sorted) {
-    if (m.start > lastEnd) {
-      nodes.push(text.slice(lastEnd, m.start));
-    }
+//   for (const m of sorted) {
+//     if (m.start > lastEnd) {
+//       nodes.push(text.slice(lastEnd, m.start));
+//     }
 
-    const revealed = revealedIndices.has(m.originalIndex);
-    if (revealed) {
-      nodes.push(
-        <span
-          key={`${m.originalIndex}-revealed`}
-          className="redacted-revealed"
-          onClick={() => onToggle(m.originalIndex)}
-          title={`${m.type} | ${m.source} — click to re-redact`}
-        >
-          {m.value}
-        </span>
-      );
-    } else {
-      nodes.push(
-        <span
-          key={`${m.originalIndex}-tag`}
-          className="redacted-tag"
-          onClick={() => onToggle(m.originalIndex)}
-          title={`${m.type} | ${m.source} — click to reveal`}
-        >
-          [{m.type}]
-        </span>
-      );
-    }
+//     const revealed = revealedIndices.has(m.originalIndex);
+//     if (revealed) {
+//       nodes.push(
+//         <span
+//           key={`${m.originalIndex}-revealed`}
+//           className="redacted-revealed"
+//           onClick={() => onToggle(m.originalIndex)}
+//           title={`${m.type} | ${m.source} — click to re-redact`}
+//         >
+//           {m.value}
+//         </span>
+//       );
+//     } else {
+//       nodes.push(
+//         <span
+//           key={`${m.originalIndex}-tag`}
+//           className="redacted-tag"
+//           onClick={() => onToggle(m.originalIndex)}
+//           title={`${m.type} | ${m.source} — click to reveal`}
+//         >
+//           [{m.type}]
+//         </span>
+//       );
+//     }
 
-    lastEnd = m.end;
-  }
+//     lastEnd = m.end;
+//   }
 
-  if (lastEnd < text.length) {
-    nodes.push(text.slice(lastEnd));
-  }
+//   if (lastEnd < text.length) {
+//     nodes.push(text.slice(lastEnd));
+//   }
 
-  return nodes;
-}
+//   return nodes;
+// }
 
 function loadTermList(storageKey: string): string[] {
   if (typeof window === 'undefined') return [];
