@@ -15,7 +15,6 @@ import { PresidioDetector } from '../shared/presidio-detector';
 import { LlamaDetector } from '../shared/llm-detector';
 import { BertNerDetector } from '../shared/bert-ner-detector';
 
-
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 const PII_DEBUG = /^1|true|yes$/i.test(process.env.PII_DEBUG ?? '');
 

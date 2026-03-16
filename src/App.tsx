@@ -189,13 +189,29 @@ function buildRedactedPreview(
       nodes.push(text.slice(lastEnd, m.start));
     }
     const color = sourceColor(m.source);
+    const confidencePct = m.confidence != null ? Math.round(m.confidence * 100) : null;
+    const tooltipParts = [m.type, m.source];
+    if (confidencePct != null) tooltipParts.push(`confidence ${confidencePct}%`);
     nodes.push(
       <mark
         key={`${m.start}-${m.end}`}
-        style={{ background: color, borderRadius: 3, padding: '0 2px' }}
-        title={`${m.type} | ${m.source}`}
+        style={{ background: color, borderRadius: 3, padding: '0 2px', position: 'relative' }}
+        title={tooltipParts.join(' · ')}
       >
         {escapeHtml(m.value)}
+        {confidencePct != null && (
+          <sup
+            style={{
+              fontSize: '0.65em',
+              fontWeight: 600,
+              marginLeft: 2,
+              opacity: 0.75,
+              letterSpacing: 0,
+            }}
+          >
+            {confidencePct}%
+          </sup>
+        )}
       </mark>
     );
     lastEnd = m.end;
@@ -275,6 +291,60 @@ function buildRedactedString(text: string, matches: Match[]): string {
   return result;
 }
 
+function buildRedactedPreview(
+  text: string,
+  matches: Match[],
+  revealedIndices: Set<number>,
+  onToggle: (index: number) => void
+): React.ReactNode[] {
+  if (!text || matches.length === 0) return [text || ''];
+
+  const sorted = matches
+    .map((m, i) => ({ ...m, originalIndex: i }))
+    .sort((a, b) => a.start - b.start);
+
+  const nodes: React.ReactNode[] = [];
+  let lastEnd = 0;
+
+  for (const m of sorted) {
+    if (m.start > lastEnd) {
+      nodes.push(text.slice(lastEnd, m.start));
+    }
+
+    const revealed = revealedIndices.has(m.originalIndex);
+    if (revealed) {
+      nodes.push(
+        <span
+          key={`${m.originalIndex}-revealed`}
+          className="redacted-revealed"
+          onClick={() => onToggle(m.originalIndex)}
+          title={`${m.type} | ${m.source} — click to re-redact`}
+        >
+          {m.value}
+        </span>
+      );
+    } else {
+      nodes.push(
+        <span
+          key={`${m.originalIndex}-tag`}
+          className="redacted-tag"
+          onClick={() => onToggle(m.originalIndex)}
+          title={`${m.type} | ${m.source} — click to reveal`}
+        >
+          [{m.type}]
+        </span>
+      );
+    }
+
+    lastEnd = m.end;
+  }
+
+  if (lastEnd < text.length) {
+    nodes.push(text.slice(lastEnd));
+  }
+
+  return nodes;
+}
 
 function loadTermList(storageKey: string): string[] {
   if (typeof window === 'undefined') return [];
@@ -613,7 +683,6 @@ function App() {
   const [revealedMatches, setRevealedMatches] = useState<Set<number>>(new Set());
   const [scannedInput, setScannedInput] = useState('');
   const [detectorMatches, setDetectorMatches] = useState<Match[]>([]);
-
   const [elapsedMs, setElapsedMs] = useState<number | undefined>(undefined);
   const [llmTokens, setLlmTokens] = useState<number | undefined>(undefined);
   const [llmElapsedMs, setLlmElapsedMs] = useState<number | undefined>(undefined);
@@ -642,7 +711,7 @@ function App() {
 
   useEffect(() => {
     if (!window.pii?.syncWordLists) return;
-    void window.pii.syncWordLists({ allowlist, blacklist });
+    void window.pii.syncWordLists({ allowlist, blacklist: blacklist.map((e) => e.term) });
   }, [allowlist, blacklist]);
 
   useEffect(() => {
@@ -1054,6 +1123,7 @@ function App() {
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onContextMenu={handleTextareaContextMenu}
             placeholder="Paste text containing PII here..."
             spellCheck={false}
           />
@@ -1077,6 +1147,46 @@ function App() {
         </div>
       </div>
 {contextMenu && (
+        <div
+          className="context-menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-label">"{contextMenu.text}"</div>
+          {contextMenu.step === 'main' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setContextMenu((c) => c && { ...c, step: 'blacklist-type' })}
+              >
+                Add to Blacklist →
+              </button>
+              <button type="button" onClick={addSelectedToAllowlist}>Add to Whitelist</button>
+              <button type="button" onClick={() => setContextMenu(null)}>Cancel</button>
+            </>
+          ) : (
+            <>
+              <div className="context-menu-section">Pick type:</div>
+              <div className="context-menu-types">
+                {PII_TYPES.map((t) => (
+                  <button key={t} type="button" onClick={() => addSelectedToBlacklist(t)}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="context-menu-back"
+                onClick={() => setContextMenu((c) => c && { ...c, step: 'main' })}
+              >
+                ← Back
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {contextMenu && (
         <div
           className="context-menu"
           style={{ top: contextMenu.y, left: contextMenu.x }}
