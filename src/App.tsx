@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { PiiType } from '@shared/types';
 
 interface Match {
   type: string;
@@ -45,6 +46,14 @@ interface WordLists {
 
 type LayerState = Record<string, boolean>;
 type WordListMenu = 'whitelist' | 'blacklist' | null;
+
+
+interface BlacklistEntry {
+  term: string;
+  type: string;
+}
+
+const PII_TYPES = Object.values(PiiType);
 
 const ALLOWLIST_STORAGE_KEY = 'pii-allowlist';
 const BLACKLIST_STORAGE_KEY = 'pii-blacklist';
@@ -122,6 +131,10 @@ function buildHighlightedPreview(text: string, matches: Match[]): React.ReactNod
     }
     if (m.start >= lastEnd) {
       const color = sourceColor(m.source);
+      const confidencePct = m.score != null ? Math.round(m.score * 100) : null;
+      const tooltipParts = [m.type, m.source];
+      if (confidencePct != null) tooltipParts.push(`confidence ${confidencePct}%`);
+
       nodes.push(
         <mark
           key={nodeKey++}
@@ -129,6 +142,19 @@ function buildHighlightedPreview(text: string, matches: Match[]): React.ReactNod
           title={`${m.type} | ${m.source}`}
         >
           {text.slice(m.start, m.end)}
+          {confidencePct != null && (
+            <sup
+              style={{
+                fontSize: '0.65em',
+                fontWeight: 600,
+                marginLeft: 2,
+                opacity: 0.75,
+                letterSpacing: 0,
+              }}
+            >
+              {confidencePct}%
+            </sup>
+          )}
         </mark>
       );
       lastEnd = m.end;
@@ -142,6 +168,114 @@ function buildHighlightedPreview(text: string, matches: Match[]): React.ReactNod
   return nodes;
 }
 
+
+function buildRedactedPreview(
+  text: string,
+  matches: Match[],
+  revealedIndices: Set<number>,
+  onToggle: (index: number) => void
+): React.ReactNode[] {
+  if (!text || matches.length === 0) return [text || ''];
+
+  const sorted = matches
+    .map((m, i) => ({ ...m, originalIndex: i }))
+    .sort((a, b) => a.start - b.start);
+
+  const nodes: React.ReactNode[] = [];
+  let lastEnd = 0;
+
+  for (const m of sorted) {
+    if (m.start > lastEnd) {
+      nodes.push(text.slice(lastEnd, m.start));
+    }
+    const color = sourceColor(m.source);
+    nodes.push(
+      <mark
+        key={`${m.start}-${m.end}`}
+        style={{ background: color, borderRadius: 3, padding: '0 2px' }}
+        title={`${m.type} | ${m.source}`}
+      >
+        {escapeHtml(m.value)}
+      </mark>
+    );
+    lastEnd = m.end;
+  }
+
+  if (lastEnd < text.length) {
+    nodes.push(escapeHtml(text.slice(lastEnd)));
+  }
+
+  return nodes;
+}
+
+function isWordChar(c: string | undefined): boolean {
+  return !!c && /[A-Za-z0-9_]/.test(c);
+}
+
+function computeBlacklistMatches(text: string, blacklist: BlacklistEntry[], allowlist: string[]): Match[] {
+  if (!text || blacklist.length === 0) return [];
+
+  const textLower = text.toLowerCase();
+  const matches: Match[] = [];
+  const entries = blacklist
+    .filter((e) => e.term.trim())
+    .sort((a, b) => b.term.length - a.term.length);
+
+  for (const entry of entries) {
+    const termLower = entry.term.toLowerCase();
+    let i = 0;
+    while (i < textLower.length) {
+      const start = textLower.indexOf(termLower, i);
+      if (start === -1) break;
+      const end = start + entry.term.length;
+      if (!isWordChar(text[start - 1]) && !isWordChar(text[end])) {
+        matches.push({ type: entry.type, start, end, value: text.slice(start, end), source: 'Manual' });
+      }
+      i = end;
+    }
+  }
+
+  if (allowlist.length === 0) return matches;
+
+  const allowedRanges: Array<{ start: number; end: number }> = [];
+  for (const term of allowlist) {
+    const termLower = term.toLowerCase().trim();
+    if (!termLower) continue;
+    let i = 0;
+    while (i < textLower.length) {
+      const start = textLower.indexOf(termLower, i);
+      if (start === -1) break;
+      allowedRanges.push({ start, end: start + term.length });
+      i = start + term.length;
+    }
+  }
+
+  return matches.filter((m) => !allowedRanges.some((r) => r.start <= m.start && r.end >= m.end));
+}
+
+function mergeMatches(base: Match[], extra: Match[]): Match[] {
+  const sorted = [...base, ...extra].sort((a, b) => a.start - b.start);
+  const result: Match[] = [];
+  let lastEnd = 0;
+  for (const m of sorted) {
+    if (m.start >= lastEnd) {
+      result.push(m);
+      lastEnd = m.end;
+    }
+  }
+  return result;
+}
+
+function buildRedactedString(text: string, matches: Match[]): string {
+  const sorted = [...matches].sort((a, b) => b.start - a.start);
+  let result = text;
+  for (const m of sorted) {
+    result = result.slice(0, m.start) + `[${m.type}]` + result.slice(m.end);
+  }
+  return result;
+}
+
+
 function loadTermList(storageKey: string): string[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -150,6 +284,28 @@ function loadTermList(storageKey: string): string[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((item): item is string => typeof item === 'string');
+  } catch {
+    return [];
+  }
+}
+
+
+function loadBlacklist(): BlacklistEntry[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(BLACKLIST_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) =>
+        typeof item === 'string'
+          ? { term: item, type: 'BLACKLIST' }
+          : typeof item?.term === 'string'
+            ? (item as BlacklistEntry)
+            : null
+      )
+      .filter((item): item is BlacklistEntry => item !== null);
   } catch {
     return [];
   }
@@ -347,7 +503,7 @@ function RedactedToken({ match, redactedLabel, isRevealed, onToggle }: TokenProp
 interface RedactedPanelProps {
   redactedText: string;
   matches: Match[];
-  revealedSet: Set<number>;
+  revealedMatches: Set<number>;
   onToggle: (matchIndex: number) => void;
   placeholder: string;
 }
@@ -357,7 +513,7 @@ interface RedactedPanelProps {
  * Strategy: walk the original `matches` sorted by start offset; for each match
  * find the corresponding placeholder in `redactedText` and replace with a chip.
  */
-function RedactedPanel({ redactedText, matches, revealedSet, onToggle, placeholder }: RedactedPanelProps) {
+function RedactedPanel({ redactedText, matches, revealedMatches, onToggle, placeholder }: RedactedPanelProps) {
   if (!redactedText) {
     return (
       <div className="redacted-output-panel redacted-output-panel--empty">
@@ -415,7 +571,7 @@ function RedactedPanel({ redactedText, matches, revealedSet, onToggle, placehold
           key={segKey++}
           match={correspondingMatch}
           redactedLabel={placeholderMatch[0]}
-          isRevealed={revealedSet.has(idx)}
+          isRevealed={revealedMatches.has(idx)}
           onToggle={() => onToggle(idx)}
         />
       );
@@ -454,6 +610,10 @@ function App() {
   const [input, setInput] = useState('');
   const [redacted, setRedacted] = useState('');
   const [matches, setMatches] = useState<Match[]>([]);
+  const [revealedMatches, setRevealedMatches] = useState<Set<number>>(new Set());
+  const [scannedInput, setScannedInput] = useState('');
+  const [detectorMatches, setDetectorMatches] = useState<Match[]>([]);
+
   const [elapsedMs, setElapsedMs] = useState<number | undefined>(undefined);
   const [llmTokens, setLlmTokens] = useState<number | undefined>(undefined);
   const [llmElapsedMs, setLlmElapsedMs] = useState<number | undefined>(undefined);
@@ -461,14 +621,16 @@ function App() {
   const [isScanning, setIsScanning] = useState(false);
 
   // track which match indices have been revealed
-  const [revealedSet, setRevealedSet] = useState<Set<number>>(new Set());
+  // const [revealedMatches, setrevealedMatches] = useState<Set<number>>(new Set());
 
   const [activeMenu, setActiveMenu] = useState<WordListMenu>(null);
   const [allowlistInput, setAllowlistInput] = useState('');
   const [blacklistInput, setBlacklistInput] = useState('');
+  const [blacklistTypeInput, setBlacklistTypeInput] = useState('BLACKLIST');
   const [allowlist, setAllowlist] = useState<string[]>(() => loadTermList(ALLOWLIST_STORAGE_KEY));
-  const [blacklist, setBlacklist] = useState<string[]>(() => loadTermList(BLACKLIST_STORAGE_KEY));
+  const [blacklist, setBlacklist] = useState<BlacklistEntry[]>(() => loadBlacklist());
   const [layerState, setLayerState] = useState<LayerState>({});
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string; step: 'main' | 'blacklist-type' } | null>(null);
 
   useEffect(() => {
     try { window.localStorage.setItem(ALLOWLIST_STORAGE_KEY, JSON.stringify(allowlist)); } catch { return; }
@@ -503,8 +665,20 @@ function App() {
 
       cleanupLayers = window.pii.onLayerState((state) => setLayerState(state));
       cleanupWordLists = window.pii.onWordLists((lists) => {
-        setAllowlist((current) => listsEqual(current, lists.allowlist) ? current : lists.allowlist);
-        setBlacklist((current) => listsEqual(current, lists.blacklist) ? current : lists.blacklist);
+        setAllowlist((current) =>
+          listsEqual(current, lists.allowlist) ? current : lists.allowlist
+        );
+
+        setBlacklist((current) => {
+          const existingMap = new Map(current.map((e) => [e.term.toLowerCase(), e]));
+          const merged = lists.blacklist.map(
+            (term) => existingMap.get(term.toLowerCase()) ?? { term, type: 'BLACKLIST' }
+          );
+          const same =
+            merged.length === current.length &&
+            merged.every((e, i) => e.term === current[i].term && e.type === current[i].type);
+          return same ? current : merged;
+        });
       });
       cleanupOpenEditor = window.pii.onOpenWordListEditor((menu) => setActiveMenu(menu));
     };
@@ -517,20 +691,36 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!scannedInput) return;
+    const newBlacklistMatches = computeBlacklistMatches(scannedInput, blacklist, allowlist);
+    const merged = mergeMatches(detectorMatches, newBlacklistMatches);
+    setMatches(merged);
+    setRedacted(buildRedactedString(scannedInput, merged));
+    setRevealedMatches(new Set());
+  }, [blacklist, scannedInput, detectorMatches, allowlist]);
+
+
+
   const handleScan = useCallback(async () => {
     setError(null);
     if (!window.pii?.scanText) { setError('Electron API not available'); return; }
     setIsScanning(true);
     try {
-      const result = await window.pii.scanText({ text: input, allowlist, blacklist });
-      // console.log('[PII scan] redactedText:', JSON.stringify(result.redactedText));
-      // console.log('[PII scan] all matches:', result.matches);
+      const result = await window.pii.scanText({
+        text: input,
+        allowlist,
+        blacklist: blacklist.map((e) => e.term),
+      });
       setRedacted(result.redactedText);
       setMatches(result.matches);
+      setRevealedMatches(new Set());
+      setScannedInput(input);
+      setDetectorMatches(result.matches.filter((m) => m.source !== 'Manual'));
       setElapsedMs(result.elapsedMs);
       setLlmTokens(result.llmTokens);
       setLlmElapsedMs(result.llmElapsedMs);
-      setRevealedSet(new Set()); // reset reveals on new scan
+      //setrevealedMatches(new Set()); // reset reveals on new scan
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Scan failed');
     } finally {
@@ -543,7 +733,7 @@ function App() {
 
     // Build a version of the redacted text where revealed tokens are substituted back
     let visibleText = redacted;
-    if (revealedSet.size > 0) {
+    if (revealedMatches.size > 0) {
       // Reconstruct deduped match list the same way RedactedPanel does
       const seen = new Set<string>();
       const deduped: (Match & { origIdx: number })[] = [];
@@ -575,7 +765,7 @@ function App() {
       while ((placeholderMatch = PLACEHOLDER_RE.exec(redacted)) !== null) {
         result += redacted.slice(lastIndex, placeholderMatch.index);
         const correspondingMatch = deduped[matchCursor];
-        if (correspondingMatch && revealedSet.has(correspondingMatch.origIdx)) {
+        if (correspondingMatch && revealedMatches.has(correspondingMatch.origIdx)) {
           result += correspondingMatch.value;
         } else {
           result += placeholderMatch[0];
@@ -594,16 +784,23 @@ function App() {
     try { await window.pii.copyToClipboard(visibleText); } catch (e) {
       setError(e instanceof Error ? e.message : 'Copy failed');
     }
-  }, [redacted, matches, revealedSet]);
+  }, [redacted, matches, revealedMatches]);
 
   const handleClear = useCallback(() => {
-    setInput(''); setRedacted(''); setMatches([]);
-    setElapsedMs(undefined); setLlmTokens(undefined); setLlmElapsedMs(undefined);
-    setError(null); setRevealedSet(new Set());
+    setInput(''); 
+    setRedacted(''); 
+    setMatches([]);
+    setScannedInput('');
+    setDetectorMatches([]);
+    setElapsedMs(undefined); 
+    setLlmTokens(undefined); 
+    setLlmElapsedMs(undefined);
+    setError(null); 
+    setRevealedMatches(new Set());
   }, []);
 
   const handleTokenToggle = useCallback((matchIndex: number) => {
-    setRevealedSet((prev) => {
+    setRevealedMatches((prev) => {
       const next = new Set(prev);
       if (next.has(matchIndex)) next.delete(matchIndex);
       else next.add(matchIndex);
@@ -611,43 +808,110 @@ function App() {
     });
   }, []);
 
-  const addTerm = useCallback(
-    (value: string, setValue: (next: string) => void, setList: React.Dispatch<React.SetStateAction<string[]>>) => {
-      const candidate = value.trim();
-      if (!candidate) return;
-      setList((current) => {
-        if (current.some((entry) => entry.toLowerCase() === candidate.toLowerCase())) return current;
-        return [...current, candidate];
-      });
-      setValue('');
-      setActiveMenu(null);
-    }, []
-  );
+  const handleAddAllowlist = useCallback(() => {
+    const candidate = allowlistInput.trim();
+    if (!candidate) return;
+    setAllowlist((current) => {
+      if (current.some((e) => e.toLowerCase() === candidate.toLowerCase())) return current;
+      return [...current, candidate];
+    });
+    setAllowlistInput('');
+    setActiveMenu(null);
+  }, [allowlistInput]);
 
-  const handleAddAllowlist = useCallback(() => addTerm(allowlistInput, setAllowlistInput, setAllowlist), [addTerm, allowlistInput]);
-  const handleAddBlacklist = useCallback(() => addTerm(blacklistInput, setBlacklistInput, setBlacklist), [addTerm, blacklistInput]);
+  const handleAddBlacklist = useCallback(() => {
+    const candidate = blacklistInput.trim();
+    if (!candidate) return;
+    setBlacklist((current) => {
+      if (current.some((e) => e.term.toLowerCase() === candidate.toLowerCase())) return current;
+      return [...current, { term: candidate, type: blacklistTypeInput }];
+    });
+    setBlacklistInput('');
+    setActiveMenu(null);
+  }, [blacklistInput, blacklistTypeInput]);
 
-  const removeTerm = useCallback((entry: string, setList: React.Dispatch<React.SetStateAction<string[]>>) => {
-    setList((current) => current.filter((item) => item !== entry));
+  const removeAllowlistTerm = useCallback((term: string) => {
+    setAllowlist((current) => current.filter((e) => e !== term));
   }, []);
 
-  const handleAllowlistKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== 'Enter') return;
-    event.preventDefault(); handleAddAllowlist();
-  }, [handleAddAllowlist]);
+  const removeBlacklistTerm = useCallback((term: string) => {
+    setBlacklist((current) => current.filter((e) => e.term !== term));
+  }, []);
 
-  const handleBlacklistKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== 'Enter') return;
-    event.preventDefault(); handleAddBlacklist();
-  }, [handleAddBlacklist]);
+  const handleAllowlistKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') { e.preventDefault(); handleAddAllowlist(); }
+    },
+    [handleAddAllowlist]
+  );
+
+  const handleBlacklistKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') { e.preventDefault(); handleAddBlacklist(); }
+    },
+    [handleAddBlacklist]
+  );
+
+  const toggleReveal = useCallback((index: number) => {
+    setRevealedMatches((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleTextareaContextMenu = useCallback(
+    (e: React.MouseEvent<HTMLTextAreaElement>) => {
+      const textarea = e.currentTarget;
+      const selected = textarea.value
+        .slice(textarea.selectionStart, textarea.selectionEnd)
+        .trim();
+      if (!selected) return;
+      e.preventDefault();
+      setContextMenu({ x: e.clientX, y: e.clientY, text: selected, step: 'main' });
+    },
+    []
+  );
+
+  const addSelectedToBlacklist = useCallback((type: string) => {
+    if (!contextMenu) return;
+    const term = contextMenu.text;
+    setBlacklist((current) => {
+      if (current.some((e) => e.term.toLowerCase() === term.toLowerCase())) return current;
+      return [...current, { term, type }];
+    });
+    setContextMenu(null);
+  }, [contextMenu]);
+
+  const addSelectedToAllowlist = useCallback(() => {
+    if (!contextMenu) return;
+    const term = contextMenu.text;
+    setAllowlist((current) => {
+      if (current.some((e) => e.toLowerCase() === term.toLowerCase())) return current;
+      return [...current, term];
+    });
+    setContextMenu(null);
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [contextMenu]);
+
+  const handleLayerToggle = useCallback((name: string, enabled: boolean) => {
+    void window.pii?.setLayer?.(name, enabled);
+  }, []);
 
   const detectedTypes = [...new Set(matches.map((m) => m.type))];
   const previewNodes = buildHighlightedPreview(input, matches);
   const layerEntries = Object.entries(layerState).sort(([a], [b]) => a.localeCompare(b));
 
-  const handleLayerToggle = useCallback((name: string, enabled: boolean) => {
-    void window.pii?.setLayer?.(name, enabled);
-  }, []);
 
   return (
     <div className="app">
@@ -684,6 +948,29 @@ function App() {
               onKeyDown={handleBlacklistKeyDown} placeholder="Always redact a word or phrase..." spellCheck={false} />
             <button type="button" onClick={handleAddBlacklist}>Add</button>
             <button type="button" onClick={() => setActiveMenu(null)}>Close</button>
+            <input
+              type="text"
+              value={blacklistInput}
+              onChange={(e) => setBlacklistInput(e.target.value)}
+              onKeyDown={handleBlacklistKeyDown}
+              placeholder="Always redact a word or phrase..."
+              spellCheck={false}
+            />
+            <select
+              value={blacklistTypeInput}
+              onChange={(e) => setBlacklistTypeInput(e.target.value)}
+              className="type-select"
+            >
+              {PII_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+            <button type="button" onClick={handleAddBlacklist}>
+              Add
+            </button>
+            <button type="button" onClick={() => setActiveMenu(null)}>
+              Close
+            </button>
           </div>
         </div>
       )}
@@ -696,7 +983,9 @@ function App() {
               {allowlist.map((entry) => (
                 <span key={`allow-${entry}`}>
                   {entry}
-                  <button type="button" onClick={() => removeTerm(entry, setAllowlist)}>Remove</button>
+                  <button type="button" onClick={() => removeAllowlistTerm(entry)}>
+                    Remove
+                  </button>
                 </span>
               ))}
             </div>
@@ -709,9 +998,12 @@ function App() {
           {blacklist.length > 0 ? (
             <div className="list-items">
               {blacklist.map((entry) => (
-                <span key={`block-${entry}`}>
-                  {entry}
-                  <button type="button" onClick={() => removeTerm(entry, setBlacklist)}>Remove</button>
+                <span key={`block-${entry.term}`}>
+                  {entry.term}
+                  <em className="entry-type-badge">{entry.type}</em>
+                  <button type="button" onClick={() => removeBlacklistTerm(entry.term)}>
+                    Remove
+                  </button>
                 </span>
               ))}
             </div>
@@ -769,25 +1061,72 @@ function App() {
         <div className="pane">
           <label>
             Redacted Output
-            {revealedSet.size > 0 && (
+            {revealedMatches.size > 0 && (
               <span style={{ marginLeft: 8, fontSize: 11, color: '#7b9eff', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
-                {revealedSet.size} revealed
+                {revealedMatches.size} revealed
               </span>
             )}
           </label>
           <RedactedPanel
             redactedText={redacted}
             matches={matches}
-            revealedSet={revealedSet}
+            revealedMatches={revealedMatches}
             onToggle={handleTokenToggle}
             placeholder="Click Scan to see redacted text..."
           />
         </div>
       </div>
+{contextMenu && (
+        <div
+          className="context-menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-label">"{contextMenu.text}"</div>
+          {contextMenu.step === 'main' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setContextMenu((c) => c && { ...c, step: 'blacklist-type' })}
+              >
+                Add to Blacklist →
+              </button>
+              <button type="button" onClick={addSelectedToAllowlist}>Add to Whitelist</button>
+              <button type="button" onClick={() => setContextMenu(null)}>Cancel</button>
+            </>
+          ) : (
+            <>
+              <div className="context-menu-section">Pick type:</div>
+              <div className="context-menu-types">
+                {PII_TYPES.map((t) => (
+                  <button key={t} type="button" onClick={() => addSelectedToBlacklist(t)}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="context-menu-back"
+                onClick={() => setContextMenu((c) => c && { ...c, step: 'main' })}
+              >
+                ← Back
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       <div className="preview-section">
-        <label style={{ fontSize: 12, color: '#a0a0a0', marginBottom: 4, display: 'block', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-          Inline Preview (matches highlighted)
+        <label
+          style={{
+            fontSize: 12,
+            color: '#a0a0a0',
+            marginBottom: 4,
+            display: 'block',
+            textTransform: 'uppercase',
+            letterSpacing: 0.5,
+          }}
+        >          Inline Preview (matches highlighted)
         </label>
         <div className={`preview ${!input ? 'preview-empty' : ''}`}>
           {input ? previewNodes : 'No input yet. Paste text and click Scan.'}

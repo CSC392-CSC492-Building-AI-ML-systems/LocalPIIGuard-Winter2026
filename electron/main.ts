@@ -13,12 +13,14 @@ import { NerDetector } from '../shared/ner-detector';
 import { SpancatDetector } from '../shared/spancat-detector';
 import { PresidioDetector } from '../shared/presidio-detector';
 import { LlamaDetector } from '../shared/llm-detector';
+import { BertNerDetector } from '../shared/bert-ner-detector';
+
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 const PII_DEBUG = /^1|true|yes$/i.test(process.env.PII_DEBUG ?? '');
 
 
-const piiDetectors = [new RegexDetector(), new NerDetector(), new SpancatDetector, new PresidioDetector, new LlamaDetector()];
+const piiDetectors = [new RegexDetector(), new NerDetector(), new SpancatDetector, new PresidioDetector, new LlamaDetector(), new BertNerDetector()];
 
 type LayerState = Record<string, boolean>;
 const layerState: LayerState = Object.fromEntries(
@@ -235,7 +237,7 @@ ipcMain.handle('pii:scan', async (_event, payload: ScanPayload) => {
     }
 
     for (const m of matches) {
-      allDetections.push({ value: m.value, source: m.source, type: m.type, score: m.score });
+      allDetections.push({ value: m.value, source: m.source, type: m.type, score: m.score});
     }
   }
 
