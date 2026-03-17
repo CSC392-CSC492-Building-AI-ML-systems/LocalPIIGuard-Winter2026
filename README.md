@@ -1,3 +1,34 @@
+## Docker Quick Start (Recommended)
+
+### Prerequisites
+
+* Docker Desktop (or Docker Engine + Docker Compose)
+* Docker daemon running
+
+### Run with Docker
+
+From the project root:
+
+```bash
+docker compose up --build
+```
+
+When startup completes, open:
+
+* `http://localhost:6080/` (popup launcher)
+* If needed: `http://localhost:6080/app.html` (direct app view)
+
+### Stop
+
+* `Ctrl + C` in the terminal running compose
+* Optional cleanup:
+
+```bash
+docker compose down
+```
+
+---
+
 ## Installation
 
 ### Prerequisites
@@ -5,7 +36,7 @@
 * Node.js (LTS recommended)
 * Python 3.9+ (for spaCy NER)
 
-### Install dependencies
+### Install dependencies (Manual Set Up - No Docker)
 
 ```bash
 npm install
