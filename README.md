@@ -29,14 +29,14 @@ docker compose down
 
 ---
 
-## Installation
+## Manual Installation (No Docker)
 
 ### Prerequisites
 
 * Node.js (LTS recommended)
 * Python 3.9+ (for spaCy NER)
 
-### Install dependencies (Manual Set Up - No Docker)
+### Install dependencies
 
 ```bash
 npm install
