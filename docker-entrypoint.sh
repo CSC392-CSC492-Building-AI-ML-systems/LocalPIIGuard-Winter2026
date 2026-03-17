@@ -17,14 +17,8 @@ echo "    Ollama is ready."
 echo "==> Building Electron TypeScript..."
 npm run build:electron
 
-echo "==> Starting Vite dev server..."
-npm run dev:vite &
-
-echo "==> Waiting for Vite to be ready..."
-until curl -sf http://localhost:5173 > /dev/null 2>&1; do
-    sleep 1
-done
-echo "    Vite is ready."
+echo "==> Building Vite assets..."
+npm run build:vite
 
 echo "==> Starting Electron..."
 ./node_modules/.bin/electron --no-sandbox . > /tmp/electron.log 2>&1 &

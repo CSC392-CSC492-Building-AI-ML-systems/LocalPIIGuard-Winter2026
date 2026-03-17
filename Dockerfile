@@ -45,7 +45,7 @@ EXPOSE 6080
 
 ENV PII_SPACY_PY=/opt/pii-venv/bin/python3
 ENV PII_BERT_PY=/opt/pii-venv/bin/python3
-ENV NODE_ENV=development
+ENV NODE_ENV=production
 ENV DISPLAY=:99
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
