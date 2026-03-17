@@ -13,7 +13,8 @@ import { NerDetector } from '../shared/ner-detector';
 import { LlamaDetector } from '../shared/llm-detector';
 import { BertNerDetector } from '../shared/bert-ner-detector';
 
-const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+const isDev = process.env.NODE_ENV === 'development';
+const openDevTools = /^1|true|yes$/i.test(process.env.PII_ELECTRON_DEVTOOLS ?? '');
 const PII_DEBUG = /^1|true|yes$/i.test(process.env.PII_DEBUG ?? '');
 
 const piiDetectors = [new RegexDetector(), new NerDetector(), new LlamaDetector(), new BertNerDetector()];
@@ -164,7 +165,9 @@ function createWindow(): void {
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
+    if (openDevTools) {
+      mainWindow.webContents.openDevTools();
+    }
   } else {
     mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   }

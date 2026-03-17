@@ -5,3 +5,7 @@ release
 *.log
 .DS_Store
 .venv
+
+# Explicitly force shell scripts and Docker files
+*.sh text eol=lf
+*.bash text eol=lf

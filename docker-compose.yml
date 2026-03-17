@@ -1,0 +1,28 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "6080:6080"
+    environment:
+      - NODE_ENV=production
+      - PII_OLLAMA_BASE=http://localhost:11434
+      - PII_OLLAMA_MODEL=phi4-mini
+      - PII_SPACY_PY=/opt/pii-venv/bin/python3
+      - PII_BERT_PY=/opt/pii-venv/bin/python3
+      - DISPLAY=:99
+    volumes:
+      - ./src:/app/src
+      - ./shared:/app/shared
+      - ./electron:/app/electron
+      - ./scripts:/app/scripts
+    # Chromium/Electron requires extra shared memory
+    shm_size: '2gb'
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
