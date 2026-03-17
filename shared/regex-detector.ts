@@ -76,17 +76,17 @@ const PATTERNS: Array<{ type: PiiType; regex: RegExp }> = [
   // Postal codes
   // US ZIP+4 only (plain 5-digit too ambiguous): 12345-6789
   {
-    type: PiiType.POSTCODE,
+    type: PiiType.LOCATION,
     regex: /\b\d{5}-\d{4}\b/g,
   },
   // Canadian: A1A 1A1 or A1A1A1
   {
-    type: PiiType.POSTCODE,
+    type: PiiType.LOCATION,
     regex: /\b[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d\b/g,
   },
   // UK: SW1A 2AA, EC1A 1BB, W1A 0AX, M1 1AE, B1 1BB
   {
-    type: PiiType.POSTCODE,
+    type: PiiType.LOCATION,
     regex: /\b[A-Za-z]{1,2}\d{1,2}[A-Za-z]?\s*\d[A-Za-z]{2}\b/g,
   },
 
