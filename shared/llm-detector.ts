@@ -493,7 +493,7 @@ Rules:
           value: spanValue,
           source: sourceName,
           label,
-          confidence,
+          score: confidence,
         });
       }
     }
