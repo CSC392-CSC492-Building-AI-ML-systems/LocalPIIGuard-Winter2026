@@ -87,7 +87,7 @@ const VALID_PII_TYPES = new Set<string>([
   PiiType.DATE,
   PiiType.USERNAME,
   PiiType.TIME,
-  PiiType.IDCARD,
+  PiiType.ID,
   PiiType.PASS,
   PiiType.SOCIALNUMBER,
 ]);
@@ -115,7 +115,7 @@ const PII_TYPE_MAP: Record<string, string> = {
   DATE: PiiType.DATE,
   USERNAME: PiiType.USERNAME,
   TIME: PiiType.TIME,
-  ID: PiiType.IDCARD,
+  ID: PiiType.ID,
   COUNTRY: PiiType.LOCATION,
   BUILDING: PiiType.LOCATION,
   STREET: PiiType.LOCATION,
