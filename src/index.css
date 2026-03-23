@@ -556,6 +556,7 @@ body {
 
 .tooltip-btn-redo:hover {
   background: #352550;
+}
 .redacted-preview {
   flex: 1;
   min-height: 200px;

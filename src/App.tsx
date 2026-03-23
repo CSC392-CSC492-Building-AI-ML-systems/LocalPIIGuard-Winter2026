@@ -923,7 +923,6 @@ function App() {
   }, []);
 
   const detectedTypes = [...new Set(matches.map((m) => m.type))];
-  const previewNodes = buildHighlightedPreview(input, matches);
   const layerEntries = Object.entries(layerState).sort(([a], [b]) => a.localeCompare(b));
 
 
@@ -1091,45 +1090,7 @@ function App() {
           />
         </div>
       </div>
-{contextMenu && (
-        <div
-          className="context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="context-menu-label">"{contextMenu.text}"</div>
-          {contextMenu.step === 'main' ? (
-            <>
-              <button
-                type="button"
-                onClick={() => setContextMenu((c) => c && { ...c, step: 'blacklist-type' })}
-              >
-                Add to Blacklist →
-              </button>
-              <button type="button" onClick={addSelectedToAllowlist}>Add to Whitelist</button>
-              <button type="button" onClick={() => setContextMenu(null)}>Cancel</button>
-            </>
-          ) : (
-            <>
-              <div className="context-menu-section">Pick type:</div>
-              <div className="context-menu-types">
-                {PII_TYPES.map((t) => (
-                  <button key={t} type="button" onClick={() => addSelectedToBlacklist(t)}>
-                    {t}
-                  </button>
-                ))}
-              </div>
-              <button
-                type="button"
-                className="context-menu-back"
-                onClick={() => setContextMenu((c) => c && { ...c, step: 'main' })}
-              >
-                ← Back
-              </button>
-            </>
-          )}
-        </div>
-      )}
+
 
       {contextMenu && (
         <div
@@ -1170,23 +1131,6 @@ function App() {
           )}
         </div>
       )}
-
-      <div className="preview-section">
-        <label
-          style={{
-            fontSize: 12,
-            color: '#a0a0a0',
-            marginBottom: 4,
-            display: 'block',
-            textTransform: 'uppercase',
-            letterSpacing: 0.5,
-          }}
-        >          Inline Preview (matches highlighted)
-        </label>
-        <div className={`preview ${!input ? 'preview-empty' : ''}`}>
-          {input ? previewNodes : 'No input yet. Paste text and click Scan.'}
-        </div>
-      </div>
     </div>
   );
 }
