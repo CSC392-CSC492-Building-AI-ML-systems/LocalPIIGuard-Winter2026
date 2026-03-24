@@ -1,4 +1,4 @@
-﻿import { app, BrowserWindow, ipcMain, clipboard, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, clipboard, Menu } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import path from 'path';
 import {
@@ -204,13 +204,26 @@ ipcMain.handle('pii:scan', async (_event, payload: ScanPayload) => {
   const input = request.text ?? '';
   const allowlist = normalizeWordList(request.allowlist);
   const blacklist = normalizeWordList(request.blacklist);
-  const activeDetectors = piiDetectors.filter((detector) => layerState[detector.getName()]);
   const startMs = Date.now();
+
+  // Split detectors into pipeline stages
+  const enabledDetectors = piiDetectors.filter((d) => layerState[d.getName()]);
+  const activeRegex = enabledDetectors.find((d) => d instanceof RegexDetector);
+  const activeNer = enabledDetectors.filter(
+    (d) =>
+      d instanceof NerDetector ||
+      d instanceof SpancatDetector ||
+      d instanceof PresidioDetector ||
+      d instanceof BertNerDetector
+  );
+  const activeLlm = enabledDetectors.find((d) => d instanceof LlamaDetector);
 
   if (PII_DEBUG) {
     console.log('[PII scan] start', {
       inputLen: input.length,
-      active: activeDetectors.map((d) => d.getName()),
+      regex: activeRegex?.getName() ?? 'disabled',
+      ner: activeNer.map((d) => d.getName()),
+      llm: activeLlm?.getName() ?? 'disabled',
       allowlistCount: allowlist.length,
       blacklistCount: blacklist.length,
     });
@@ -218,43 +231,63 @@ ipcMain.handle('pii:scan', async (_event, payload: ScanPayload) => {
 
   const allDetections: Array<{ value: string; source: string; type: PiiType; score?: number | null }> = [];
 
-  const manualMatches = applyAllowlist(
-    input,
-    collectManualMatches(input, blacklist),
-    allowlist
-  );
+  // --- Stage 0: Manual blacklist (always on original text) ---
+  const manualMatches = applyAllowlist(input, collectManualMatches(input, blacklist), allowlist);
   for (const m of manualMatches) {
     allDetections.push({ value: m.value, source: m.source, type: m.type, score: m.score });
   }
 
-  for (const detector of activeDetectors) {
-    const rawMatches = await detector.collectMatches(input);
-    const matches = applyAllowlist(input, rawMatches, allowlist);
+  // --- Stage 1: Regex on original text ---
+  const regexRawMatches = activeRegex ? await activeRegex.collectMatches(input) : [];
+  const regexMatches = applyAllowlist(input, regexRawMatches, allowlist);
+  if (PII_DEBUG) console.log('[PII scan] Regex', { raw: regexRawMatches.length, afterAllowlist: regexMatches.length });
+  for (const m of regexMatches) {
+    allDetections.push({ value: m.value, source: m.source, type: m.type, score: m.score });
+  }
 
-    if (PII_DEBUG) {
-      console.log('[PII scan]', detector.getName(), {
-        rawMatches: rawMatches.length,
-        afterAllowlist: matches.length,
-      });
-    }
+  // Mask regex + manual findings so NER models see pre-cleaned text
+  const stage1Masks = [...manualMatches, ...regexMatches];
+  const stage1Text = stage1Masks.length > 0 ? maskText(input, stage1Masks) : input;
 
-    for (const m of matches) {
-      allDetections.push({ value: m.value, source: m.source, type: m.type, score: m.score});
+  // --- Stage 2: NER models in parallel on regex-masked text ---
+  const nerResultArrays = await Promise.all(
+    activeNer.map(async (d) => {
+      const raw = await d.collectMatches(stage1Text);
+      const filtered = applyAllowlist(stage1Text, raw, allowlist);
+      if (PII_DEBUG) console.log('[PII scan]', d.getName(), { raw: raw.length, afterAllowlist: filtered.length });
+      return filtered;
+    })
+  );
+  const allNerMatches = nerResultArrays.flat();
+  for (const m of allNerMatches) {
+    allDetections.push({ value: m.value, source: m.source, type: m.type, score: m.score });
+  }
+
+  // Mask NER findings on top of stage1Text so the LLM sees a fully pre-cleaned text
+  const stage2Text = allNerMatches.length > 0 ? maskText(stage1Text, allNerMatches) : stage1Text;
+
+  // --- Stage 3: LLM on fully pre-masked text ---
+  if (activeLlm) {
+    const llmRaw = await activeLlm.collectMatches(stage2Text);
+    const llmMatches = applyAllowlist(stage2Text, llmRaw, allowlist);
+    if (PII_DEBUG) console.log('[PII scan] LLM', { raw: llmRaw.length, afterAllowlist: llmMatches.length });
+    for (const m of llmMatches) {
+      allDetections.push({ value: m.value, source: m.source, type: m.type, score: m.score });
     }
   }
 
+  // Reconstruct all detections back to original text coordinate space, then produce final redacted output
   const finalMatches = reconstructMatches(input, allDetections);
   const redactedText = maskText(input, finalMatches);
   const result = { redactedText, matches: finalMatches };
   const elapsedMs = Date.now() - startMs;
-  const llama = activeDetectors.find((detector) => detector.getName() === 'LLM');
   const llmTokens =
-    llama && 'getLastEvalCount' in llama
-      ? (llama as LlamaDetector).getLastEvalCount()
+    activeLlm && 'getLastEvalCount' in activeLlm
+      ? (activeLlm as LlamaDetector).getLastEvalCount()
       : undefined;
   const llmElapsedMs =
-    llama && 'getLastElapsedMs' in llama
-      ? (llama as LlamaDetector).getLastElapsedMs()
+    activeLlm && 'getLastElapsedMs' in activeLlm
+      ? (activeLlm as LlamaDetector).getLastElapsedMs()
       : undefined;
 
   if (PII_DEBUG) {
