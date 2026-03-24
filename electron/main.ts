@@ -1,6 +1,9 @@
 import { app, BrowserWindow, ipcMain, clipboard, Menu } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
+import { spawn } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import path from 'path';
+import fs from 'fs';
 import {
   applyAllowlist,
   collectManualMatches,
@@ -18,6 +21,100 @@ import { BertNerDetector } from '../shared/bert-ner-detector';
 const isDev = process.env.NODE_ENV === 'development';
 const openDevTools = /^1|true|yes$/i.test(process.env.PII_ELECTRON_DEVTOOLS ?? '');
 const PII_DEBUG = /^1|true|yes$/i.test(process.env.PII_DEBUG ?? '');
+
+// ── NER server lifecycle ──────────────────────────────────────────────────────
+
+let nerServer: ChildProcess | null = null;
+let nerServerReady = false;
+let isQuitting = false;
+let nerRestartAttempt = 0;
+const MAX_NER_RESTART_ATTEMPTS = 5;
+
+function resolveNerServerScript(): string {
+  if (process.env.PII_NER_SCRIPT) return process.env.PII_NER_SCRIPT;
+  return path.join(app.getAppPath(), 'scripts', 'ner_server.py');
+}
+
+function startNerServer(): void {
+  const scriptPath = resolveNerServerScript();
+  if (!fs.existsSync(scriptPath)) {
+    console.warn('[NER server] script not found at', scriptPath, '— NER detectors disabled');
+    return;
+  }
+
+  const pythonBin = process.env.PII_NER_PY ?? process.env.PII_SPACY_PY ?? 'python3';
+  if (PII_DEBUG) console.log('[NER server] spawning', pythonBin, scriptPath);
+
+  nerServer = spawn(pythonBin, [scriptPath], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env },
+  });
+
+  let stdoutBuf = '';
+
+  nerServer.stdout?.on('data', (chunk: Buffer) => {
+    stdoutBuf += chunk.toString();
+    const lines = stdoutBuf.split('\n');
+    stdoutBuf = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (PII_DEBUG) console.log('[NER server] stdout:', trimmed);
+
+      const portMatch = trimmed.match(/^PORT=(\d+)$/);
+      if (portMatch) {
+        const port = portMatch[1];
+        process.env.PII_NER_BASE = `http://127.0.0.1:${port}`;
+        if (PII_DEBUG) console.log('[NER server] port set to', port);
+      }
+
+      if (trimmed === 'READY') {
+        nerRestartAttempt = 0;
+        nerServerReady = true;
+        console.log('[NER server] ready at', process.env.PII_NER_BASE);
+      }
+    }
+  });
+
+  nerServer.stderr?.on('data', (chunk: Buffer) => {
+    if (PII_DEBUG) console.log('[NER server] stderr:', chunk.toString().trimEnd());
+  });
+
+  nerServer.on('error', (err) => {
+    console.error('[NER server] spawn error:', err.message);
+    scheduleNerRestart();
+  });
+
+  nerServer.on('exit', (code, signal) => {
+    nerServer = null;
+    nerServerReady = false;
+    if (isQuitting) return;
+    console.warn(`[NER server] exited unexpectedly (code=${code}, signal=${signal})`);
+    scheduleNerRestart();
+  });
+}
+
+function scheduleNerRestart(): void {
+  if (isQuitting) return;
+  if (nerRestartAttempt >= MAX_NER_RESTART_ATTEMPTS) {
+    console.error('[NER server] max restart attempts reached — NER detectors disabled');
+    return;
+  }
+  const delayMs = Math.min(1_000 * 2 ** nerRestartAttempt, 30_000);
+  nerRestartAttempt += 1;
+  console.log(`[NER server] restarting in ${delayMs}ms (attempt ${nerRestartAttempt}/${MAX_NER_RESTART_ATTEMPTS})`);
+  setTimeout(startNerServer, delayMs);
+}
+
+function stopNerServer(): void {
+  if (!nerServer) return;
+  isQuitting = true;
+  nerServer.kill('SIGTERM');
+  // Give the server a moment to shut down cleanly; force-kill if it lingers.
+  const forceKill = setTimeout(() => nerServer?.kill('SIGKILL'), 3_000);
+  nerServer.once('exit', () => clearTimeout(forceKill));
+  nerServer = null;
+}
 
 
 const piiDetectors = [new RegexDetector(), new NerDetector(), new SpancatDetector, new PresidioDetector, new LlamaDetector(), new BertNerDetector()];
@@ -177,6 +274,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  startNerServer();
   buildMenu();
   createWindow();
 
@@ -187,6 +285,10 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  stopNerServer();
 });
 
 type ScanPayload = { text?: string; allowlist?: string[]; blacklist?: string[] } | string;
@@ -250,14 +352,19 @@ ipcMain.handle('pii:scan', async (_event, payload: ScanPayload) => {
   const stage1Text = stage1Masks.length > 0 ? maskText(input, stage1Masks) : input;
 
   // --- Stage 2: NER models in parallel on regex-masked text ---
-  const nerResultArrays = await Promise.all(
-    activeNer.map(async (d) => {
-      const raw = await d.collectMatches(stage1Text);
-      const filtered = applyAllowlist(stage1Text, raw, allowlist);
-      if (PII_DEBUG) console.log('[PII scan]', d.getName(), { raw: raw.length, afterAllowlist: filtered.length });
-      return filtered;
-    })
-  );
+  if (activeNer.length > 0 && !nerServerReady) {
+    console.warn('[PII scan] NER server not ready – skipping NER stage');
+  }
+  const nerResultArrays = nerServerReady
+    ? await Promise.all(
+        activeNer.map(async (d) => {
+          const raw = await d.collectMatches(stage1Text);
+          const filtered = applyAllowlist(stage1Text, raw, allowlist);
+          if (PII_DEBUG) console.log('[PII scan]', d.getName(), { raw: raw.length, afterAllowlist: filtered.length });
+          return filtered;
+        })
+      )
+    : [];
   const allNerMatches = nerResultArrays.flat();
   for (const m of allNerMatches) {
     allDetections.push({ value: m.value, source: m.source, type: m.type, score: m.score });

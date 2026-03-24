@@ -1,0 +1,14 @@
+# Python dependencies for the LocalPIIGuard NER server.
+# Install with:  pip install -r requirements.txt
+# Then download the spaCy model:  python -m spacy download en_core_web_sm
+
+# NER server transport
+flask>=3.1
+
+# NLP / NER models
+spacy>=3.8
+presidio-analyzer>=2.2
+
+# Transformer-based NER (dslim/bert-large-NER)
+transformers>=4.40
+torch>=2.0
