@@ -17,5 +17,6 @@ services:
       - ./shared:/app/shared
       - ./electron:/app/electron
       - ./scripts:/app/scripts
+      - ./test-case:/app/test-case
     # Chromium/Electron requires extra shared memory
     shm_size: '2gb'

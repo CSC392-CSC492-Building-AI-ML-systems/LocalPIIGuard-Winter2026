@@ -1,6 +1,7 @@
 import random
 import subprocess
 import json
+import sys
 import time
 from datasets import load_dataset
 import re
@@ -9,19 +10,77 @@ from tqdm import tqdm
 import math
 
 valid_label = {
+    # NAME
     "first_name": "NAME",
     "last_name": "NAME",
     "NAME": "NAME",
-    "LOCATION": "LOCATION",
+
+    # LOCATION
+    "street_address": "LOCATION",
     "city": "LOCATION",
     "county": "LOCATION",
     "state": "LOCATION",
-    "street_address": "LOCATION",
-    "ORG": "ORG",
+    "postcode": "LOCATION",
+    "country": "LOCATION",
+    "coordinate": "LOCATION",
+    "LOCATION": "LOCATION",
+
+    # ORG
     "company_name": "ORG",
+    "ORG": "ORG",
+
+    # EMAIL
+    "email": "EMAIL",
+    "EMAIL": "EMAIL",
+
+    # PHONE
+    "phone_number": "PHONE",
+    "fax_number": "PHONE",
+    "PHONE": "PHONE",
+
+    # IP
+    "ipv4": "IP",
+    "IP": "IP",
+
+    # MAC
+    "mac_address": "MAC",
+    "MAC": "MAC",
+
+    # CARD
+    "credit_debit_card": "CARD",
+    "cvv": "CARD",
+    "account_number": "CARD",
+    "CARD": "CARD",
+
+    # IBAN
+    "bank_routing_number": "IBAN",
+    "swift_bic": "IBAN",
+    "IBAN": "IBAN",
+
+    # DATE
+    "date_of_birth": "DATE",
+    "date": "DATE",
+    "date_time": "DATE",
+    "DATE": "DATE",
+
+    # USERNAME
+    "user_name": "USERNAME",
+    "USERNAME": "USERNAME",
+
+    # TIME
+    "time": "TIME",
+    "TIME": "TIME",
+
+    # PASS
+    "password": "PASS",
+    "PASS": "PASS",
+
+    # SOCIALNUMBER
+    "ssn": "SOCIALNUMBER",
+    "SOCIALNUMBER": "SOCIALNUMBER",
 }
 
-LABELS = ["NAME", "LOCATION", "ORG"]
+LABELS = ["NAME", "LOCATION", "ORG", "EMAIL", "PHONE", "IP", "MAC", "CARD", "IBAN", "DATE", "USERNAME", "TIME", "PASS", "SOCIALNUMBER"]
 
 def parse_text(text, pii, label_name="type"):
     words = []
@@ -69,7 +128,8 @@ def detect_texts_single_batch(texts: List[str], detector_type: int = 1) -> Tuple
     if proc.returncode != 0:
         raise RuntimeError(f"Node.js error:\n{proc.stderr}")
 
-    results = json.loads(proc.stdout)
+    json_line = proc.stdout.strip().split('\n')[-1]
+    results = json.loads(json_line)
     return results, duration
 
 def detect_texts_batched(
@@ -166,17 +226,18 @@ if __name__ == "__main__":
     texts = test_set["text"]
     all_spans = test_set["spans"]
 
-    sample_size = 100
+    sample_size = 500
+    random.seed(42)
     indices = random.sample(range(len(texts)), sample_size)
     sample_texts = [texts[i] for i in indices]
     sample_spans = [all_spans[i] for i in indices]
 
-    detector_type = 3  # one detector per run
+    detector_type = int(sys.argv[1])  # one detector per run
 
     results, total_duration = detect_texts_batched(
         sample_texts,
         detector_type=detector_type,
-        batch_size=5,
+        batch_size=10,
         auto_shrink_on_oserror=True,
     )
 
@@ -192,7 +253,7 @@ if __name__ == "__main__":
         desc="Parsing & evaluating",
         unit="text",
     ):
-        print(text)
+        # print(results)
         if not isinstance(correct_res, list):
             try:
                 correct_res = json.loads(str(correct_res).replace("'", '"'))
@@ -202,6 +263,7 @@ if __name__ == "__main__":
 
         pred_seq = parse_text(text, res, label_name="type")
         true_seq = parse_text(text, correct_res, label_name="label")
+
 
         if len(pred_seq) != len(true_seq):
             raise ValueError(f"Token length mismatch: pred_len={len(pred_seq)} true_len={len(true_seq)}")
