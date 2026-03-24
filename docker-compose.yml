@@ -19,10 +19,3 @@ services:
       - ./scripts:/app/scripts
     # Chromium/Electron requires extra shared memory
     shm_size: '2gb'
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
