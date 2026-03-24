@@ -1,0 +1,23 @@
+Total subprocess time 886.693 seconds processing 63401 word/tokens (evaluated 491 samples, skipped 9)
+
+Per-label (one-vs-rest) results:
+  NAME: acc=0.989322 | TP=469 FP=504 TN=62255 FN=173
+  LOCATION: acc=0.989401 | TP=411 FP=107 TN=62318 FN=565
+  ORG: acc=0.976168 | TP=343 FP=1368 TN=61547 FN=143
+  EMAIL: acc=0.996782 | TP=0 FP=0 TN=63197 FN=204
+  PHONE: acc=0.997603 | TP=0 FP=0 TN=63249 FN=152
+  IP: acc=0.999543 | TP=0 FP=0 TN=63372 FN=29
+  MAC: acc=0.999748 | TP=0 FP=0 TN=63385 FN=16
+  CARD: acc=0.993943 | TP=0 FP=0 TN=63017 FN=384
+  IBAN: acc=0.998801 | TP=0 FP=0 TN=63325 FN=76
+  DATE: acc=0.982934 | TP=365 FP=891 TN=61954 FN=191
+  USERNAME: acc=0.998580 | TP=0 FP=0 TN=63311 FN=90
+  TIME: acc=0.997965 | TP=181 FP=68 TN=63091 FN=61
+  PASS: acc=0.999416 | TP=0 FP=0 TN=63364 FN=37
+  SOCIALNUMBER: acc=0.999495 | TP=0 FP=0 TN=63369 FN=32
+
+Micro (summed over one-vs-rest labels):
+  acc=0.994264 | TP=1769 FP=2938 TN=880754 FN=2153
+
+Combined ANY-PII (positive if any of NAME/LOCATION/ORG predicted):
+  acc=0.939039 | TP=2382 FP=2325 TN=57154 FN=1540

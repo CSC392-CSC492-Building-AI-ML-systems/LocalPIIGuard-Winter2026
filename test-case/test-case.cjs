@@ -1,6 +1,10 @@
 // ner-detector-cli.cjs
-const { NerDetector } = require('../dist-electron/shared/ner-detector.js');
 const { RegexDetector } = require('../dist-electron/shared/regex-detector.js');
+const { NerDetector } = require('../dist-electron/shared/ner-detector.js');
+const { SpancatDetector } = require('../dist-electron/shared/spancat-detector.js');
+const { PresidioDetector } = require('../dist-electron/shared/presidio-detector.js');
+const { LlamaDetector } = require('../dist-electron/shared/llm-detector.js');
+const { BertNerDetector } = require('../dist-electron/shared/bert-ner-detector.js');
 const process = require('process');
 
 const data = process.argv[2];   // JSON array of strings
@@ -25,25 +29,34 @@ if (!data || !detectorType) {
     let detector;
     switch (parseInt(detectorType, 10)) {
         case 1:
-            detector = new RegexDetector();
+            detector = new NerDetector();
             break;
         case 2:
-            detector = new NerDetector();
+            detector = new RegexDetector();
+            break;
+        case 3:
+            detector = new SpancatDetector();
+            break;
+        case 4:
+            detector = new PresidioDetector();
+            break;
+        case 5:
+            detector = new LlamaDetector();
+            break;
+        case 6:
+            detector = new BertNerDetector();
             break;
         default:
             console.error("Unknown detector type:", detectorType);
             process.exit(1);
     }
 
-    const results = [];
-    for (const text of texts) {
-        try {
-            const r = await detector.collectMatches(text);
-            results.push(r);
-        } catch (err) {
-            results.push({ error: err.message });
-        }
-    }
+    const results = await Promise.all(
+    texts.map(text =>
+        detector.collectMatches(text).catch(err => ({ error: err.message }))
+    )
+    );
+
 
     console.log(JSON.stringify(results));
 })();
