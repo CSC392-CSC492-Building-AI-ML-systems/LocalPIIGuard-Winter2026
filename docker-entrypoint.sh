@@ -1,36 +1,20 @@
 #!/bin/bash
 set -e
 
-echo "==> Starting Xvfb virtual display on :99..."
-Xvfb :99 -screen 0 900x600x24 -ac &
-sleep 1
-
-echo "==> Starting Ollama service..."
-ollama serve &
-
-echo "==> Waiting for Ollama to become ready..."
-until curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; do
+if command -v ollama >/dev/null 2>&1; then
+  echo "==> Starting Ollama service..."
+  ollama serve > /tmp/ollama.log 2>&1 &
+  echo "==> Waiting for Ollama to become ready..."
+  for _ in $(seq 1 30); do
+    if curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; then
+      echo "    Ollama is ready."
+      break
+    fi
     sleep 1
-done
-echo "    Ollama is ready."
+  done
+else
+  echo "==> Ollama not installed in image; LLM detector may be unavailable."
+fi
 
-echo "==> Building Electron TypeScript..."
-npm run build:electron
-
-echo "==> Building Vite assets..."
-npm run build:vite
-
-echo "==> Starting Electron..."
-./node_modules/.bin/electron --no-sandbox . > /tmp/electron.log 2>&1 &
-sleep 3
-echo "--- Electron log ---"
-cat /tmp/electron.log
-echo "--------------------"
-
-echo "==> Starting x11vnc..."
-# This is a bit of a workaround since we can't start electron as a website directly. 
-x11vnc -display :99 -nopw -listen localhost -xkb -forever -shared -rfbport 5900 > /tmp/x11vnc.log 2>&1 &
-sleep 2
-
-echo "==> Starting noVNC on port 6080..."
-exec websockify --web /usr/share/novnc/ 6080 localhost:5900
+echo "==> Starting LocalPIIGuard web server..."
+exec node /app/dist-server/server/index.js

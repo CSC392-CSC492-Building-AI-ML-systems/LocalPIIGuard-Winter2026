@@ -6,12 +6,15 @@
   "author": "",
   "license": "MIT",
   "scripts": {
-    "dev": "npm run build:electron && concurrently -k \"npm run dev:vite\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
+    "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:vite\"",
     "dev:vite": "vite",
-    "dev:electron": "electron .",
-    "build": "npm run build:vite && npm run build:electron",
+    "dev:server": "npm run build:server && PII_LLM_DISABLE=1 node dist-server/server/index.js",
+    "build": "npm run build:vite && npm run build:server",
     "build:vite": "vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "dev:electron": "electron .",
     "build:electron": "tsc -p tsconfig.electron.json",
+    "dev:electron:legacy": "npm run build:electron && concurrently -k \"npm run dev:vite\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"electron/**/*.ts\" \"shared/**/*.ts\""
   },

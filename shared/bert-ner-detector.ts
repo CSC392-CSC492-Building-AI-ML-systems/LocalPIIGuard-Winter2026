@@ -19,7 +19,14 @@ export class BertNerDetector extends NerHttpDetector {
 
   override async collectMatches(text: string): Promise<RawMatch[]> {
     const matches = await super.collectMatches(text);
-    return selectNonOverlapping(matches);
+    const filtered = matches.filter((m) => {
+      const v = m.value?.trim() ?? '';
+      if (!v) return false;
+      if (v.startsWith('##')) return false;
+      if (v.length <= 1) return false;
+      return true;
+    });
+    return selectNonOverlapping(filtered);
   }
 
   getName(): string {
