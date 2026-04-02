@@ -10,13 +10,12 @@
 From the project root:
 
 ```bash
-docker compose up --build
+./run.sh up --build
 ```
 
 When startup completes, open:
 
-* `http://localhost:6080/` (popup launcher)
-* If needed: `http://localhost:6080/app.html` (direct app view)
+* `http://localhost:8787/`
 
 ### Stop
 
