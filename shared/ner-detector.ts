@@ -19,6 +19,6 @@ export class NerDetector extends NerHttpDetector {
   }
 
   getName(): string {
-    return 'Ner (Spacy)';
+    return 'NER (Spacy)';
   }
 }

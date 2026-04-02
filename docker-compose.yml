@@ -4,19 +4,14 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "6080:6080"
+      - "8787:8787"
     environment:
       - NODE_ENV=production
       - PII_OLLAMA_BASE=http://localhost:11434
       - PII_OLLAMA_MODEL=phi4-mini
+      - PII_OLLAMA_TIMEOUT_MS=600000
       - PII_SPACY_PY=/opt/pii-venv/bin/python3
       - PII_BERT_PY=/opt/pii-venv/bin/python3
+      - PII_WEB_PORT=8787
+      - PII_DEBUG=1
       - DISPLAY=:99
-    volumes:
-      - ./src:/app/src
-      - ./shared:/app/shared
-      - ./electron:/app/electron
-      - ./scripts:/app/scripts
-      - ./test-case:/app/test-case
-    # Chromium/Electron requires extra shared memory
-    shm_size: '2gb'

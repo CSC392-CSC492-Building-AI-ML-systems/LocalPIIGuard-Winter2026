@@ -6,3 +6,4 @@ dist-electron
 npm-debug.log*
 *.log
 test-case
+.venv

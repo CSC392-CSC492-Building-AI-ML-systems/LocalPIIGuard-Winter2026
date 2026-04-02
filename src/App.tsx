@@ -12,7 +12,7 @@ interface Match {
 
 const SOURCE_COLORS: Record<string, string> = {
   Regex: '#fde68a',
-  'Ner (Spacy)': '#a5f3fc',
+  'NER (Spacy)': '#a5f3fc',
   LLM: '#e9d5ff',
   Manual: '#fecaca',
   'Presidio': '#11f3fc',
@@ -25,6 +25,26 @@ function sourceColor(source: string): string {
   return SOURCE_COLORS[source] ?? DEFAULT_SOURCE_COLOR;
 }
 
+const LAYER_ORDER = [
+  'Regex',
+  'NER (Spacy)',
+  'Spancat (Spacy)',
+  'Presidio (Analyzer)',
+  'NER (BERT)',
+  'LLM',
+] as const;
+
+const LAYER_TOOLTIPS: Record<string, string> = {
+  Regex: 'Pattern-based detector for structured PII (email, phone, IDs, IPs). Speed: Fast.',
+  'NER (Spacy)': 'spaCy NER for people, orgs, locations, dates, and times. Speed: Fast.',
+  'Spancat (Spacy)':
+    'spaCy SpanCategorizer for broader contextual PII span detection. Speed: Fast to moderate.',
+  'Presidio (Analyzer)':
+    'Presidio recognizers for policy-focused entities (PII/security-sensitive fields). Speed: Moderate.',
+  'NER (BERT)': 'Transformer-based NER for person/org/location extraction. Speed: Moderate.',
+  LLM: 'Contextual LLM pass to catch remaining nuanced PII after earlier masking. Speed: Much slower.',
+};
+
 interface ScanResult {
   redactedText: string;
   matches: Match[];
@@ -33,20 +53,8 @@ interface ScanResult {
   llmElapsedMs?: number;
 }
 
-interface ScanRequest {
-  text: string;
-  allowlist?: string[];
-  blacklist?: string[];
-}
-
-interface WordLists {
-  allowlist: string[];
-  blacklist: string[];
-}
-
 type LayerState = Record<string, boolean>;
 type WordListMenu = 'allowlist' | 'blacklist' | null;
-
 
 interface BlacklistEntry {
   term: string;
@@ -67,6 +75,9 @@ type NerStatus = 'starting' | 'ready' | 'unavailable';
 const ALLOWLIST_STORAGE_KEY = 'pii-allowlist';
 const BLACKLIST_STORAGE_KEY = 'pii-blacklist';
 
+interface ScanRequest { text: string; allowlist?: string[]; blacklist?: string[] }
+interface WordLists { allowlist: string[]; blacklist: string[] }
+
 declare global {
   interface Window {
     pii?: {
@@ -86,12 +97,21 @@ declare global {
     };
   }
 }
-/*
-function escapeHtml(text: string): string {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}*/
+
+async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `Request failed: ${res.status}`);
+  }
+  return (await res.json()) as T;
+}
 
 function formatElapsed(ms: number): string {
   if (ms < 1000) return `${ms} ms`;
@@ -113,73 +133,6 @@ function formatTimePerToken(llmElapsedMs: number, llmTokens: number): string {
   }
   return `${(msPerTok * 1000).toFixed(0)} us/tok | ${tokPerS.toFixed(0)} tok/s`;
 }
-
-function buildHighlightedPreview(text: string, matches: Match[]): React.ReactNode[] {
-  if (!text || matches.length === 0) {
-    return [<span key={0}>{text}</span>];
-  }
-
-  // Deduplicate exact spans and collapse overlaps 
-  const seen = new Set<string>();
-  const deduped: Match[] = [];
-  [...matches]
-    .sort((a, b) => a.start - b.start || b.end - a.end)
-    .forEach((m) => {
-      const key = `${m.start}-${m.end}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      const last = deduped[deduped.length - 1];
-      if (last && m.start < last.end) return; // skip overlapping
-      deduped.push(m);
-    });
-
-  const nodes: React.ReactNode[] = [];
-  let lastEnd = 0;
-  let nodeKey = 0;
-
-  for (const m of deduped) {
-    if (m.start > lastEnd) {
-      nodes.push(<span key={nodeKey++}>{text.slice(lastEnd, m.start)}</span>);
-    }
-    if (m.start >= lastEnd) {
-      const color = sourceColor(m.source);
-      const confidencePct = m.score != null ? Math.round(m.score * 100) : null;
-      const tooltipParts = [m.type, m.source];
-      if (confidencePct != null) tooltipParts.push(`confidence ${confidencePct}%`);
-
-      nodes.push(
-        <mark
-          key={nodeKey++}
-          style={{ background: color, borderRadius: 3, padding: '0 2px' }}
-          title={`${m.type} | ${m.source}`}
-        >
-          {text.slice(m.start, m.end)}
-          {confidencePct != null && (
-            <sup
-              style={{
-                fontSize: '0.65em',
-                fontWeight: 600,
-                marginLeft: 2,
-                opacity: 0.75,
-                letterSpacing: 0,
-              }}
-            >
-              {confidencePct}%
-            </sup>
-          )}
-        </mark>
-      );
-      lastEnd = m.end;
-    }
-  }
-
-  if (lastEnd < text.length) {
-    nodes.push(<span key={nodeKey++}>{text.slice(lastEnd)}</span>);
-  }
-
-  return nodes;
-}
-
 
 function isWordChar(c: string | undefined): boolean {
   return !!c && /[A-Za-z0-9_]/.test(c);
@@ -248,61 +201,6 @@ function buildRedactedString(text: string, matches: Match[]): string {
   return result;
 }
 
-// function buildRedactedPreview(
-//   text: string,
-//   matches: Match[],
-//   revealedIndices: Set<number>,
-//   onToggle: (index: number) => void
-// ): React.ReactNode[] {
-//   if (!text || matches.length === 0) return [text || ''];
-
-//   const sorted = matches
-//     .map((m, i) => ({ ...m, originalIndex: i }))
-//     .sort((a, b) => a.start - b.start);
-
-//   const nodes: React.ReactNode[] = [];
-//   let lastEnd = 0;
-
-//   for (const m of sorted) {
-//     if (m.start > lastEnd) {
-//       nodes.push(text.slice(lastEnd, m.start));
-//     }
-
-//     const revealed = revealedIndices.has(m.originalIndex);
-//     if (revealed) {
-//       nodes.push(
-//         <span
-//           key={`${m.originalIndex}-revealed`}
-//           className="redacted-revealed"
-//           onClick={() => onToggle(m.originalIndex)}
-//           title={`${m.type} | ${m.source} — click to re-redact`}
-//         >
-//           {m.value}
-//         </span>
-//       );
-//     } else {
-//       nodes.push(
-//         <span
-//           key={`${m.originalIndex}-tag`}
-//           className="redacted-tag"
-//           onClick={() => onToggle(m.originalIndex)}
-//           title={`${m.type} | ${m.source} — click to reveal`}
-//         >
-//           [{m.type}]
-//         </span>
-//       );
-//     }
-
-//     lastEnd = m.end;
-//   }
-
-//   if (lastEnd < text.length) {
-//     nodes.push(text.slice(lastEnd));
-//   }
-
-//   return nodes;
-// }
-
 function loadTermList(storageKey: string): string[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -315,7 +213,6 @@ function loadTermList(storageKey: string): string[] {
     return [];
   }
 }
-
 
 function loadBlacklist(): BlacklistEntry[] {
   if (typeof window === 'undefined') return [];
@@ -337,13 +234,6 @@ function loadBlacklist(): BlacklistEntry[] {
     return [];
   }
 }
-
-function listsEqual(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  return a.every((item, index) => item === b[index]);
-}
-
-// redacted token tooltip 
 
 interface TooltipProps {
   match: Match;
@@ -470,8 +360,6 @@ function RedactedTooltip({ match, isRevealed, onToggle, anchorRef, onMouseEnter,
   );
 }
 
-// redacted token chip 
-
 interface TokenProps {
   match: Match;
   redactedLabel: string;
@@ -525,8 +413,6 @@ function RedactedToken({ match, redactedLabel, isRevealed, onToggle }: TokenProp
   );
 }
 
-// redacted output panel 
-
 interface RedactedPanelProps {
   redactedText: string;
   matches: Match[];
@@ -535,11 +421,6 @@ interface RedactedPanelProps {
   placeholder: string;
 }
 
-/**
- * Parses the redacted text and injects interactive chips for each redacted span.
- * Strategy: walk the original `matches` sorted by start offset; for each match
- * find the corresponding placeholder in `redactedText` and replace with a chip.
- */
 function RedactedPanel({ redactedText, matches, revealedMatches, onToggle, placeholder }: RedactedPanelProps) {
   if (!redactedText) {
     return (
@@ -549,7 +430,6 @@ function RedactedPanel({ redactedText, matches, revealedMatches, onToggle, place
     );
   }
 
-  // deduplicate matches 
   const seen = new Set<string>();
   const deduped: (Match & { origIdx: number })[] = [];
   [...matches]
@@ -572,19 +452,13 @@ function RedactedPanel({ redactedText, matches, revealedMatches, onToggle, place
       }
     });
 
-  // Log for debugging 
-  // console.debug('[RedactedPanel] redactedText:', JSON.stringify(redactedText));
-  // console.debug('[RedactedPanel] deduped matches:', deduped.map(m => `${m.start}-${m.end} ${m.type} (${m.source})`));
-
-  // scan redactedText for placeholders and zip with deduped matches 
-  // no spaces allowed inside brackets 
-  const PLACEHOLDER_RE = /(\[[\w:/.-]+\]|<[\w:/.-]+>|█+|\*{3,})/g;
-
   const segments: React.ReactNode[] = [];
   let lastIndex = 0;
   let matchCursor = 0;
   let segKey = 0; // monotonically increasing key — never duplicates
   let placeholderMatch: RegExpExecArray | null;
+
+  const PLACEHOLDER_RE = /(\[[\w:/.-]+\]|<[\w:/.-]+>|█+|\*{3,})/g;
 
   while ((placeholderMatch = PLACEHOLDER_RE.exec(redactedText)) !== null) {
     const before = redactedText.slice(lastIndex, placeholderMatch.index);
@@ -615,23 +489,12 @@ function RedactedPanel({ redactedText, matches, revealedMatches, onToggle, place
     segments.push(<span key={segKey++}>{redactedText.slice(lastIndex)}</span>);
   }
 
-  // if no placeholders were detected at all, show text as is
-  if (segments.length === 0 || matchCursor === 0) {
-    return (
-      <div className="redacted-output-panel">
-        <pre className="redacted-pre">{redactedText}</pre>
-      </div>
-    );
-  }
-
   return (
     <div className="redacted-output-panel">
       <pre className="redacted-pre">{segments}</pre>
     </div>
   );
 }
-
-// Main App 
 
 function App() {
   const [input, setInput] = useState('');
@@ -671,54 +534,15 @@ function App() {
   }, [blacklist]);
 
   useEffect(() => {
-    if (!window.pii?.syncWordLists) return;
-    void window.pii.syncWordLists({ allowlist, blacklist: blacklist.map((e) => e.term) });
-  }, [allowlist, blacklist]);
-
-  useEffect(() => {
-    let cleanupLayers: (() => void) | undefined;
-    let cleanupWordLists: (() => void) | undefined;
-    let cleanupOpenEditor: (() => void) | undefined;
-
     const init = async () => {
-      if (
-        !window.pii?.getLayerState ||
-        !window.pii?.onLayerState ||
-        !window.pii?.onWordLists ||
-        !window.pii?.onOpenWordListEditor
-      ) return;
-
       try {
-        const current = await window.pii.getLayerState();
+        const current = await apiJson<LayerState>('/api/layers');
         setLayerState(current);
-      } catch { return; }
-
-      cleanupLayers = window.pii.onLayerState((state) => setLayerState(state));
-      cleanupWordLists = window.pii.onWordLists((lists) => {
-        setAllowlist((current) =>
-          listsEqual(current, lists.allowlist) ? current : lists.allowlist
-        );
-
-        setBlacklist((current) => {
-          const existingMap = new Map(current.map((e) => [e.term.toLowerCase(), e]));
-          const merged = lists.blacklist.map(
-            (term) => existingMap.get(term.toLowerCase()) ?? { term, type: 'BLACKLIST' }
-          );
-          const same =
-            merged.length === current.length &&
-            merged.every((e, i) => e.term === current[i].term && e.type === current[i].type);
-          return same ? current : merged;
-        });
-      });
-      cleanupOpenEditor = window.pii.onOpenWordListEditor((menu) => setActiveMenu(menu));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load PII layer state');
+      }
     };
-
     void init();
-    return () => {
-      if (cleanupLayers) cleanupLayers();
-      if (cleanupWordLists) cleanupWordLists();
-      if (cleanupOpenEditor) cleanupOpenEditor();
-    };
   }, []);
 
   useEffect(() => {
@@ -741,19 +565,25 @@ function App() {
     return cleanup;
   }, []);
 
-
-
   const handleScan = useCallback(async () => {
     setError(null);
     if (!input.trim()) { setError('Paste some text to scan first.'); return; }
-    if (!window.pii?.scanText) { setError('Electron API not available'); return; }
     setIsScanning(true);
+    const controller = new AbortController();
+    const timeoutMs = layerState['LLM'] ? 5 * 60_000 : 30_000;
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const result = await window.pii.scanText({
-        text: input,
-        allowlist,
-        blacklist: blacklist.map((e) => e.term),
+      console.log('[ui] scan start', { inputLen: input.length });
+      const result = await apiJson<ScanResult>('/api/scan', {
+        method: 'POST',
+        body: JSON.stringify({
+          text: input,
+          allowlist,
+          blacklist: blacklist.map((e) => e.term),
+        }),
+        signal: controller.signal,
       });
+      console.log('[ui] scan response', { redactedLen: result.redactedText?.length ?? 0, matches: result.matches?.length ?? 0 });
       setRedacted(result.redactedText);
       setMatches(result.matches);
       setRevealedMatches(new Set());
@@ -764,44 +594,37 @@ function App() {
       setLlmElapsedMs(result.llmElapsedMs);
       setIsStale(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Scan failed');
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        setError('Scan timed out');
+      } else {
+        setError(e instanceof Error ? e.message : 'Scan failed');
+      }
     } finally {
+      window.clearTimeout(timeoutId);
+      controller.abort();
       setIsScanning(false);
+      console.log('[ui] scan finally');
     }
-  }, [allowlist, blacklist, input]);
+  }, [allowlist, blacklist, input, layerState]);
 
   const handleCopy = useCallback(async () => {
     if (!redacted) return;
 
-    // Build a version of the redacted text where revealed tokens are substituted back
     let visibleText = redacted;
     if (revealedMatches.size > 0) {
-      // Reconstruct deduped match list the same way RedactedPanel does
-      const seen = new Set<string>();
       const deduped: (Match & { origIdx: number })[] = [];
       [...matches]
         .map((m, i) => ({ ...m, origIdx: i }))
         .sort((a, b) => a.start - b.start || b.end - a.end)
         .forEach((m) => {
-          const key = `${m.start}-${m.end}`;
-          if (seen.has(key)) return;
-          seen.add(key);
-          const last = deduped[deduped.length - 1];
-          if (last && m.start < last.end) {
-            if ((m.score ?? 0) > (last.score ?? 0)) {
-              seen.delete(`${last.start}-${last.end}`);
-              deduped[deduped.length - 1] = m;
-            }
-          } else {
-            deduped.push(m);
-          }
+          if (deduped.some((e) => e.start === m.start && e.end === m.end)) return;
+          deduped.push(m);
         });
 
-      // Walk placeholders in redactedText and replace revealed ones with original values
-      const PLACEHOLDER_RE = /(\[[\w:/.-]+\]|<[\w:/.-]+>|█+|\*{3,})/g;
       let result = '';
       let lastIndex = 0;
       let matchCursor = 0;
+      const PLACEHOLDER_RE = /(\[[\w:/.-]+\]|<[\w:/.-]+>|█+|\*{3,})/g;
       let placeholderMatch: RegExpExecArray | null;
 
       while ((placeholderMatch = PLACEHOLDER_RE.exec(redacted)) !== null) {
@@ -925,18 +748,6 @@ function App() {
     [handleAddBlacklist]
   );
 
-  const toggleReveal = useCallback((index: number) => {
-    setRevealedMatches((prev) => {
-      const next = new Set(prev);
-      if (next.has(index)) {
-        next.delete(index);
-      } else {
-        next.add(index);
-      }
-      return next;
-    });
-  }, []);
-
   const handleTextareaKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -946,6 +757,7 @@ function App() {
     },
     [handleScan]
   );
+
 
   const handleTextareaContextMenu = useCallback(
     (e: React.MouseEvent<HTMLTextAreaElement>) => {
@@ -990,13 +802,25 @@ function App() {
   }, [contextMenu]);
 
   const handleLayerToggle = useCallback((name: string, enabled: boolean) => {
-    void window.pii?.setLayer?.(name, enabled);
+    setLayerState((current) => ({ ...current, [name]: enabled }));
+    void apiJson<LayerState>('/api/layers/set', {
+      method: 'POST',
+      body: JSON.stringify({ name, enabled }),
+    }).then((next) => setLayerState(next)).catch(() => {
+      return;
+    });
     if (scannedInput) setIsStale(true);
   }, [scannedInput]);
 
   const detectedTypes = [...new Set(matches.map((m) => m.type))];
-  const layerEntries = Object.entries(layerState).sort(([a], [b]) => a.localeCompare(b));
-
+  const layerEntries = (Object.entries(layerState) as Array<[string, boolean]>).sort(([a], [b]) => {
+    const aOrder = LAYER_ORDER.indexOf(a as (typeof LAYER_ORDER)[number]);
+    const bOrder = LAYER_ORDER.indexOf(b as (typeof LAYER_ORDER)[number]);
+    if (aOrder === -1 && bOrder === -1) return a.localeCompare(b);
+    if (aOrder === -1) return 1;
+    if (bOrder === -1) return -1;
+    return aOrder - bOrder;
+  });
 
   return (
     <div className="app">
@@ -1018,9 +842,11 @@ function App() {
         <button type="button" onClick={handleCopy} disabled={!redacted || isScanning} className={copied ? 'btn--copied' : ''}>
           {copied ? 'Copied ✓' : 'Copy Redacted'}
         </button>
-        <button type="button" onClick={handleSave} disabled={!redacted || isScanning}>
-          Save…
-        </button>
+        {window.pii?.saveRedacted && (
+          <button type="button" onClick={handleSave} disabled={!redacted || isScanning}>
+            Save…
+          </button>
+        )}
         <button type="button" onClick={handleClear} disabled={isScanning}>
           Clear
         </button>
@@ -1184,8 +1010,10 @@ function App() {
         )}
         <div className="layer-toggles">
           <span style={{ fontSize: 12, color: '#a0a0a0', marginRight: 8 }}>PII layers:</span>
-          {layerEntries.map(([name, enabled]) => (
-            <label key={name} className="layer-toggle">
+          {layerEntries.length === 0 ? (
+            <span style={{ fontSize: 12, color: '#a0a0a0' }}>Unavailable (backend not connected)</span>
+          ) : layerEntries.map(([name, enabled]) => (
+            <label key={name} className="layer-toggle" title={LAYER_TOOLTIPS[name] ?? `${name} detector`}>
               <input type="checkbox" checked={enabled} onChange={(e) => handleLayerToggle(name, e.target.checked)} />
               <span style={{ background: sourceColor(name), borderRadius: 3, padding: '1px 6px', color: '#111', opacity: enabled ? 1 : 0.4 }}>
                 {name}
