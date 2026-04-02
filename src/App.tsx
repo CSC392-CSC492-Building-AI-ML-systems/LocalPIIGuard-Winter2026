@@ -34,7 +34,7 @@ interface ScanResult {
 }
 
 type LayerState = Record<string, boolean>;
-type WordListMenu = 'whitelist' | 'blacklist' | null;
+type WordListMenu = 'allowlist' | 'blacklist' | null;
 
 interface BlacklistEntry {
   term: string;
@@ -42,9 +42,41 @@ interface BlacklistEntry {
 }
 
 const PII_TYPES = Object.values(PiiType);
+const COMMON_PII_TYPES: PiiType[] = [
+  PiiType.EMAIL, PiiType.PHONE, PiiType.NAME, PiiType.LOCATION,
+  PiiType.ORG, PiiType.ID, PiiType.DATE, PiiType.CARD,
+];
+
+const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
+const SCAN_HINT = isMac ? '⌘ Return' : 'Ctrl+Enter';
+
+type NerStatus = 'starting' | 'ready' | 'unavailable';
 
 const ALLOWLIST_STORAGE_KEY = 'pii-allowlist';
 const BLACKLIST_STORAGE_KEY = 'pii-blacklist';
+
+interface ScanRequest { text: string; allowlist?: string[]; blacklist?: string[] }
+interface WordLists { allowlist: string[]; blacklist: string[] }
+
+declare global {
+  interface Window {
+    pii?: {
+      scanText: (request: ScanRequest | string) => Promise<ScanResult>;
+      copyToClipboard: (text: string) => Promise<void>;
+      syncWordLists: (lists: WordLists) => Promise<void>;
+      getLayerState: () => Promise<LayerState>;
+      setLayer: (name: string, enabled: boolean) => Promise<void>;
+      onLayerState: (handler: (state: LayerState) => void) => () => void;
+      onWordLists: (handler: (lists: WordLists) => void) => () => void;
+      onOpenWordListEditor: (
+        handler: (menu: Exclude<WordListMenu, null>) => void
+      ) => () => void;
+      getNerStatus: () => Promise<NerStatus>;
+      onNerStatus: (handler: (status: NerStatus) => void) => () => void;
+      saveRedacted: (text: string) => Promise<{ success: boolean; filePath?: string; reason?: string }>;
+    };
+  }
+}
 
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -456,6 +488,13 @@ function App() {
   const [llmElapsedMs, setLlmElapsedMs] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [isStale, setIsStale] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [nerStatus, setNerStatus] = useState<NerStatus | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showWordLists, setShowWordLists] = useState(() =>
+    loadTermList(ALLOWLIST_STORAGE_KEY).length > 0 || loadBlacklist().length > 0
+  );
 
   const [activeMenu, setActiveMenu] = useState<WordListMenu>(null);
   const [allowlistInput, setAllowlistInput] = useState('');
@@ -464,7 +503,7 @@ function App() {
   const [allowlist, setAllowlist] = useState<string[]>(() => loadTermList(ALLOWLIST_STORAGE_KEY));
   const [blacklist, setBlacklist] = useState<BlacklistEntry[]>(() => loadBlacklist());
   const [layerState, setLayerState] = useState<LayerState>({});
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string; step: 'main' | 'blacklist-type' } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string; step: 'main' | 'blacklist-type'; showAll?: boolean } | null>(null);
 
   useEffect(() => {
     try { window.localStorage.setItem(ALLOWLIST_STORAGE_KEY, JSON.stringify(allowlist)); } catch { return; }
@@ -495,8 +534,20 @@ function App() {
     setRevealedMatches(new Set());
   }, [blacklist, scannedInput, detectorMatches, allowlist]);
 
+  useEffect(() => {
+    if (scannedInput) setIsStale(input !== scannedInput);
+  }, [input, scannedInput]);
+
+  useEffect(() => {
+    if (!window.pii?.getNerStatus || !window.pii?.onNerStatus) return;
+    void window.pii.getNerStatus().then(setNerStatus).catch(() => {});
+    const cleanup = window.pii.onNerStatus(setNerStatus);
+    return cleanup;
+  }, []);
+
   const handleScan = useCallback(async () => {
     setError(null);
+    if (!input.trim()) { setError('Paste some text to scan first.'); return; }
     setIsScanning(true);
     const controller = new AbortController();
     const timeoutMs = layerState['LLM'] ? 5 * 60_000 : 30_000;
@@ -521,6 +572,7 @@ function App() {
       setElapsedMs(result.elapsedMs);
       setLlmTokens(result.llmTokens);
       setLlmElapsedMs(result.llmElapsedMs);
+      setIsStale(false);
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
         setError('Scan timed out');
@@ -570,8 +622,42 @@ function App() {
       visibleText = result;
     }
 
-    try { await navigator.clipboard.writeText(visibleText); } catch { setError('Clipboard not available'); }
+    const flashCopied = () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      setCopied(true);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 1500);
+    };
+
+    if (!window.pii?.copyToClipboard) {
+      try {
+        await navigator.clipboard.writeText(visibleText);
+        flashCopied();
+      } catch { setError('Clipboard not available'); }
+      return;
+    }
+    try {
+      await window.pii.copyToClipboard(visibleText);
+      flashCopied();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Copy failed');
+    }
   }, [redacted, matches, revealedMatches]);
+
+  const handleSave = useCallback(async () => {
+    if (!redacted) return;
+    if (!window.pii?.saveRedacted) {
+      setError('Save not available outside Electron');
+      return;
+    }
+    try {
+      const result = await window.pii.saveRedacted(redacted);
+      if (!result.success && result.reason !== 'canceled') {
+        setError(result.reason ?? 'Save failed');
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed');
+    }
+  }, [redacted]);
 
   const handleClear = useCallback(() => {
     setInput(''); 
@@ -584,6 +670,7 @@ function App() {
     setLlmElapsedMs(undefined);
     setError(null); 
     setRevealedMatches(new Set());
+    setIsStale(false);
   }, []);
 
   const handleTokenToggle = useCallback((matchIndex: number) => {
@@ -604,6 +691,7 @@ function App() {
     });
     setAllowlistInput('');
     setActiveMenu(null);
+    setShowWordLists(true);
   }, [allowlistInput]);
 
   const handleAddBlacklist = useCallback(() => {
@@ -615,6 +703,7 @@ function App() {
     });
     setBlacklistInput('');
     setActiveMenu(null);
+    setShowWordLists(true);
   }, [blacklistInput, blacklistTypeInput]);
 
   const removeAllowlistTerm = useCallback((term: string) => {
@@ -639,6 +728,17 @@ function App() {
     [handleAddBlacklist]
   );
 
+  const handleTextareaKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        void handleScan();
+      }
+    },
+    [handleScan]
+  );
+
+
   const handleTextareaContextMenu = useCallback(
     (e: React.MouseEvent<HTMLTextAreaElement>) => {
       const textarea = e.currentTarget;
@@ -660,6 +760,7 @@ function App() {
       return [...current, { term, type }];
     });
     setContextMenu(null);
+    setShowWordLists(true);
   }, [contextMenu]);
 
   const addSelectedToAllowlist = useCallback(() => {
@@ -670,6 +771,7 @@ function App() {
       return [...current, term];
     });
     setContextMenu(null);
+    setShowWordLists(true);
   }, [contextMenu]);
 
   useEffect(() => {
@@ -687,52 +789,68 @@ function App() {
     }).then((next) => setLayerState(next)).catch(() => {
       return;
     });
-  }, []);
+    if (scannedInput) setIsStale(true);
+  }, [scannedInput]);
 
   const detectedTypes = [...new Set(matches.map((m) => m.type))];
   const layerEntries = (Object.entries(layerState) as Array<[string, boolean]>).sort(([a], [b]) => a.localeCompare(b));
 
   return (
     <div className="app">
+      <header className="app-header">
+        <div className="app-header-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M12 2L4 5v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V5l-8-3z" fill="#7b9eff"/>
+            <path d="M10 13l-2-2-1.4 1.4L10 15.8l6-6L14.6 8.4 10 13z" fill="#1a1a2e"/>
+          </svg>
+          Local PII Guard
+        </div>
+        <span className="app-header-sub">Local-first PII detection &amp; redaction</span>
+      </header>
       <div className="toolbar">
         <button type="button" onClick={handleScan} disabled={isScanning}>
           {isScanning && <span className="spinner" aria-hidden />}
           {isScanning ? 'Scanning...' : 'Scan'}
         </button>
-        <button type="button" onClick={() => setActiveMenu('whitelist')} disabled={isScanning}>
-          Whitelist
+        <button type="button" onClick={handleCopy} disabled={!redacted || isScanning} className={copied ? 'btn--copied' : ''}>
+          {copied ? 'Copied ✓' : 'Copy Redacted'}
         </button>
-        <button type="button" onClick={() => setActiveMenu('blacklist')} disabled={isScanning}>
-          Blacklist
-        </button>
-        <button type="button" onClick={handleCopy} disabled={!redacted || isScanning}>
-          Copy Redacted
+        <button type="button" onClick={handleSave} disabled={!redacted || isScanning}>
+          Save…
         </button>
         <button type="button" onClick={handleClear} disabled={isScanning}>
           Clear
         </button>
       </div>
 
-      {activeMenu === 'whitelist' && (
+      {nerStatus === 'starting' && (
+        <div className="ner-banner ner-banner--starting">
+          <span className="ner-banner-spinner" aria-hidden />
+          NER models loading — first scan may be regex-only
+        </div>
+      )}
+      {nerStatus === 'unavailable' && (
+        <div className="ner-banner ner-banner--unavailable">
+          ⚠ NER server unavailable — only regex detections will run
+        </div>
+      )}
+
+      {activeMenu === 'allowlist' && (
         <div className="word-editor">
-          <label>Add Whitelisted Word</label>
+          <label>Add Allowlisted Term</label>
           <div className="word-editor-row">
             <input type="text" value={allowlistInput} onChange={(e) => setAllowlistInput(e.target.value)}
-              onKeyDown={handleAllowlistKeyDown} placeholder="Allow a word or phrase..." spellCheck={false} />
+              onKeyDown={handleAllowlistKeyDown} placeholder="Allow a word or phrase..." spellCheck={false} autoFocus />
             <button type="button" onClick={handleAddAllowlist}>Add</button>
-            <button type="button" onClick={() => setActiveMenu(null)}>Close</button>
+            <button type="button" onClick={() => { setActiveMenu(null); setAllowlistInput(''); }}>Close</button>
           </div>
         </div>
       )}
 
       {activeMenu === 'blacklist' && (
         <div className="word-editor">
-          <label>Add Blacklisted Word</label>
+          <label>Add Blacklisted Term</label>
           <div className="word-editor-row">
-            <input type="text" value={blacklistInput} onChange={(e) => setBlacklistInput(e.target.value)}
-              onKeyDown={handleBlacklistKeyDown} placeholder="Always redact a word or phrase..." spellCheck={false} />
-            <button type="button" onClick={handleAddBlacklist}>Add</button>
-            <button type="button" onClick={() => setActiveMenu(null)}>Close</button>
             <input
               type="text"
               value={blacklistInput}
@@ -740,6 +858,7 @@ function App() {
               onKeyDown={handleBlacklistKeyDown}
               placeholder="Always redact a word or phrase..."
               spellCheck={false}
+              autoFocus
             />
             <select
               value={blacklistTypeInput}
@@ -750,73 +869,115 @@ function App() {
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
-            <button type="button" onClick={handleAddBlacklist}>
-              Add
-            </button>
-            <button type="button" onClick={() => setActiveMenu(null)}>
-              Close
-            </button>
+            <button type="button" onClick={handleAddBlacklist}>Add</button>
+            <button type="button" onClick={() => { setActiveMenu(null); setBlacklistInput(''); }}>Close</button>
           </div>
         </div>
       )}
 
-      <div className="list-panels">
-        <div className="list-panel">
-          <label>Whitelisted Words</label>
-          {allowlist.length > 0 ? (
-            <div className="list-items">
-              {allowlist.map((entry) => (
-                <span key={`allow-${entry}`}>
-                  {entry}
-                  <button type="button" onClick={() => removeAllowlistTerm(entry)}>
-                    Remove
-                  </button>
-                </span>
-              ))}
-            </div>
-          ) : (
-            <div className="list-empty">No whitelisted words added.</div>
+      <div className="word-lists-header">
+        <button
+          type="button"
+          className="word-lists-toggle"
+          onClick={() => setShowWordLists((v) => !v)}
+          aria-expanded={showWordLists}
+        >
+          <svg
+            width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden
+            style={{ transform: showWordLists ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}
+          >
+            <path d="M3 2l4 3-4 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Word Lists
+          {(allowlist.length > 0 || blacklist.length > 0) && (
+            <span className="word-lists-count">
+              {allowlist.length + blacklist.length}
+            </span>
           )}
-        </div>
-        <div className="list-panel">
-          <label>Blacklisted Words</label>
-          {blacklist.length > 0 ? (
-            <div className="list-items">
-              {blacklist.map((entry) => (
-                <span key={`block-${entry.term}`}>
-                  {entry.term}
-                  <em className="entry-type-badge">{entry.type}</em>
-                  <button type="button" onClick={() => removeBlacklistTerm(entry.term)}>
-                    Remove
-                  </button>
-                </span>
-              ))}
-            </div>
-          ) : (
-            <div className="list-empty">No blacklisted words added.</div>
-          )}
+        </button>
+        <div className="word-lists-actions">
+          <button
+            type="button"
+            className="word-lists-add-btn"
+            onClick={() => { setShowWordLists(true); setActiveMenu('allowlist'); }}
+            title="Add allowlisted term"
+          >
+            + Allowlist
+          </button>
+          <button
+            type="button"
+            className="word-lists-add-btn word-lists-add-btn--block"
+            onClick={() => { setShowWordLists(true); setActiveMenu('blacklist'); }}
+            title="Add blocklisted term"
+          >
+            + Blocklist
+          </button>
         </div>
       </div>
 
+      {showWordLists && (
+        <div className="list-panels">
+          <div className="list-panel">
+            <label>Allowlisted Terms</label>
+            {allowlist.length > 0 ? (
+              <div className="list-items">
+                {allowlist.map((entry) => (
+                  <span key={`allow-${entry}`}>
+                    {entry}
+                    <button type="button" onClick={() => removeAllowlistTerm(entry)} aria-label={`Remove ${entry}`}>
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="list-empty">No allowlisted terms.</div>
+            )}
+          </div>
+          <div className="list-panel">
+            <label>Blocklisted Terms</label>
+            {blacklist.length > 0 ? (
+              <div className="list-items">
+                {blacklist.map((entry) => (
+                  <span key={`block-${entry.term}`}>
+                    {entry.term}
+                    <em className="entry-type-badge">{entry.type}</em>
+                    <button type="button" onClick={() => removeBlacklistTerm(entry.term)} aria-label={`Remove ${entry.term}`}>
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="list-empty">No blocklisted terms.</div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="stats" role="status" aria-live="polite" aria-busy={isScanning}>
-        <strong>{isScanning ? '-' : matches.length}</strong> match
-        {isScanning || matches.length !== 1 ? 'es' : ''} found
-        {elapsedMs != null && !isScanning && (
-          <span className="elapsed" style={{ marginLeft: 8, color: '#888', fontWeight: 'normal' }}>
-            in {formatElapsed(elapsedMs)}
-            {llmTokens != null && llmElapsedMs != null && llmTokens > 0 && (
-              <span style={{ marginLeft: 8 }}>
-                | {llmTokens.toLocaleString()} tok
-                {llmElapsedMs > 0 && <> | {formatTimePerToken(llmElapsedMs, llmTokens)}</>}
+        {(scannedInput || isScanning) && (
+          <>
+            <strong>{isScanning ? '…' : matches.length}</strong> match
+            {isScanning || matches.length !== 1 ? 'es' : ''} found
+            {elapsedMs != null && !isScanning && (
+              <span className="elapsed" style={{ marginLeft: 8, color: '#888', fontWeight: 'normal' }}>
+                in {formatElapsed(elapsedMs)}
+                {llmTokens != null && llmElapsedMs != null && llmTokens > 0 && (
+                  <span style={{ marginLeft: 8 }}>
+                    | {llmTokens.toLocaleString()} tok
+                    {llmElapsedMs > 0 && <> | {formatTimePerToken(llmElapsedMs, llmTokens)}</>}
+                  </span>
+                )}
               </span>
             )}
-          </span>
-        )}
-        {detectedTypes.length > 0 && !isScanning && (
-          <div className="detected-types">
-            Detected:{' '}
-            {detectedTypes.map((t) => <span key={t}>{t}</span>)}
-          </div>
+            {detectedTypes.length > 0 && !isScanning && (
+              <div className="detected-types">
+                Detected:{' '}
+                {detectedTypes.map((t) => <span key={t}>{t}</span>)}
+              </div>
+            )}
+          </>
         )}
         <div className="layer-toggles">
           <span style={{ fontSize: 12, color: '#a0a0a0', marginRight: 8 }}>PII layers:</span>
@@ -831,22 +992,32 @@ function App() {
             </label>
           ))}
         </div>
-      </div>
+      </div>  {/* stats */}
 
-      {error && <div style={{ color: '#ff6b6b', fontSize: 12 }}>{error}</div>}
+      {error && (
+        <div className="error-banner">
+          <span className="error-banner-text">{error}</span>
+          <button type="button" className="error-banner-dismiss" onClick={() => setError(null)} aria-label="Dismiss error">×</button>
+        </div>
+      )}
 
       <div className="panes">
-        <div className="pane">
-          <label>Raw Input</label>
+        <div className="pane pane--input">
+          <label>
+            Raw Input
+            <span className="pane-hint">{SCAN_HINT} to scan</span>
+          </label>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleTextareaKeyDown}
             onContextMenu={handleTextareaContextMenu}
             placeholder="Paste text containing PII here..."
             spellCheck={false}
+            aria-label="Raw input text"
           />
         </div>
-        <div className="pane">
+        <div className={`pane pane--output${isScanning ? ' pane--scanning' : ''}`}>
           <label>
             Redacted Output
             {revealedMatches.size > 0 && (
@@ -854,13 +1025,16 @@ function App() {
                 {revealedMatches.size} revealed
               </span>
             )}
+            {isStale && (
+              <span className="stale-badge">⚠ outdated</span>
+            )}
           </label>
           <RedactedPanel
             redactedText={redacted}
             matches={matches}
             revealedMatches={revealedMatches}
             onToggle={handleTokenToggle}
-            placeholder="Click Scan to see redacted text..."
+            placeholder="Paste text and click Scan (or Ctrl+Enter)…"
           />
         </div>
       </div>
@@ -877,18 +1051,32 @@ function App() {
             <>
               <button
                 type="button"
-                onClick={() => setContextMenu((c) => c && { ...c, step: 'blacklist-type' })}
+                onClick={() => setContextMenu((c) => c && { ...c, step: 'blacklist-type', showAll: false })}
               >
-                Add to Blacklist →
+                Add to Blocklist →
               </button>
-              <button type="button" onClick={addSelectedToAllowlist}>Add to Whitelist</button>
+              <button type="button" onClick={addSelectedToAllowlist}>Add to Allowlist</button>
               <button type="button" onClick={() => setContextMenu(null)}>Cancel</button>
             </>
           ) : (
             <>
               <div className="context-menu-section">Pick type:</div>
               <div className="context-menu-types">
-                {PII_TYPES.map((t) => (
+                {COMMON_PII_TYPES.map((t) => (
+                  <button key={t} type="button" onClick={() => addSelectedToBlacklist(t)}>
+                    {t}
+                  </button>
+                ))}
+                {!contextMenu.showAll && PII_TYPES.filter((t) => !COMMON_PII_TYPES.includes(t)).length > 0 && (
+                  <button
+                    type="button"
+                    className="context-menu-more"
+                    onClick={(e) => { e.stopPropagation(); setContextMenu((c) => c && { ...c, showAll: true }); }}
+                  >
+                    More…
+                  </button>
+                )}
+                {contextMenu.showAll && PII_TYPES.filter((t) => !COMMON_PII_TYPES.includes(t)).map((t) => (
                   <button key={t} type="button" onClick={() => addSelectedToBlacklist(t)}>
                     {t}
                   </button>

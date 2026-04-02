@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, clipboard, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, clipboard, Menu, dialog } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import { spawn } from 'child_process';
 import type { ChildProcess } from 'child_process';
@@ -26,6 +26,7 @@ const PII_DEBUG = /^1|true|yes$/i.test(process.env.PII_DEBUG ?? '');
 
 let nerServer: ChildProcess | null = null;
 let nerServerReady = false;
+let nerStatus: 'starting' | 'ready' | 'unavailable' = 'starting';
 let isQuitting = false;
 let nerRestartAttempt = 0;
 const MAX_NER_RESTART_ATTEMPTS = 5;
@@ -71,7 +72,9 @@ function startNerServer(): void {
       if (trimmed === 'READY') {
         nerRestartAttempt = 0;
         nerServerReady = true;
+        nerStatus = 'ready';
         console.log('[NER server] ready at', process.env.PII_NER_BASE);
+        notifyNerStatus();
       }
     }
   });
@@ -98,6 +101,8 @@ function scheduleNerRestart(): void {
   if (isQuitting) return;
   if (nerRestartAttempt >= MAX_NER_RESTART_ATTEMPTS) {
     console.error('[NER server] max restart attempts reached — NER detectors disabled');
+    nerStatus = 'unavailable';
+    notifyNerStatus();
     return;
   }
   const delayMs = Math.min(1_000 * 2 ** nerRestartAttempt, 30_000);
@@ -144,11 +149,16 @@ function notifyWordLists(): void {
   });
 }
 
+function notifyNerStatus(): void {
+  if (!mainWindow) return;
+  mainWindow.webContents.send('pii:ner-status', nerStatus);
+}
+
 function openWordEditor(list: 'allowlist' | 'blacklist'): void {
   if (!mainWindow) return;
   mainWindow.webContents.send(
     'pii:open-word-editor',
-    list === 'allowlist' ? 'whitelist' : 'blacklist'
+    list === 'allowlist' ? 'allowlist' : 'blacklist'
   );
 }
 
@@ -261,6 +271,10 @@ function createWindow(): void {
       nodeIntegration: false,
       sandbox: false,
     },
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    notifyNerStatus();
   });
 
   if (isDev) {
@@ -414,6 +428,24 @@ ipcMain.handle('pii:copy', (_event, text: string) => {
 });
 
 ipcMain.handle('pii:get-layers', () => ({ ...layerState }));
+
+ipcMain.handle('pii:get-ner-status', () => nerStatus);
+
+ipcMain.handle('pii:save-file', async (_event, text: string) => {
+  if (!mainWindow) return { success: false, reason: 'no-window' };
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save Redacted Text',
+    defaultPath: 'redacted.txt',
+    filters: [{ name: 'Text Files', extensions: ['txt'] }],
+  });
+  if (canceled || !filePath) return { success: false, reason: 'canceled' };
+  try {
+    fs.writeFileSync(filePath, text, 'utf-8');
+    return { success: true, filePath };
+  } catch (err) {
+    return { success: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+});
 
 ipcMain.handle('pii:set-layer', (_event, name: string, enabled: boolean) => {
   if (typeof name !== 'string' || typeof enabled !== 'boolean') return;

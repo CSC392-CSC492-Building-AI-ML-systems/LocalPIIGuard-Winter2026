@@ -26,6 +26,34 @@ body {
   gap: 12px;
 }
 
+/* ─── App Header ─────────────────────────────────────────────────────────────── */
+
+.app-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.app-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #eaeaea;
+  letter-spacing: 0.2px;
+}
+
+.app-header-sub {
+  font-size: 11px;
+  color: #6c7294;
+  letter-spacing: 0.2px;
+}
+
+/* ─── Toolbar ─────────────────────────────────────────────────────────────────── */
+
 .toolbar {
   display: flex;
   gap: 8px;
@@ -167,16 +195,175 @@ body {
 .list-items button {
   border: 0;
   background: transparent;
-  color: #a9c1ff;
+  color: #6c7294;
   cursor: pointer;
-  padding: 0;
-  font-size: 11px;
-  text-transform: uppercase;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+  transition: color 0.12s;
+}
+
+.list-items button:hover {
+  color: #f87171;
 }
 
 .list-empty {
   font-size: 12px;
   color: #6c7294;
+}
+
+/* ─── NER Status Banner ──────────────────────────────────────────────────────── */
+
+.ner-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ner-banner--starting {
+  background: #1a1400;
+  border: 1px solid #f59e0b44;
+  color: #fbbf24;
+}
+
+.ner-banner--unavailable {
+  background: #1a0d00;
+  border: 1px solid #f8713444;
+  color: #fb923c;
+}
+
+.ner-banner-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #f59e0b44;
+  border-top-color: #f59e0b;
+  border-radius: 50%;
+  animation: spinner 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ─── Error Banner ───────────────────────────────────────────────────────────── */
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: #1a0000;
+  border: 1px solid #f8717144;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #ff6b6b;
+}
+
+.error-banner-text {
+  flex: 1;
+}
+
+.error-banner-dismiss {
+  background: transparent;
+  border: none;
+  color: #f87171;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: opacity 0.12s;
+}
+
+.error-banner-dismiss:hover {
+  opacity: 1;
+}
+
+/* ─── Copied button state ────────────────────────────────────────────────────── */
+
+.toolbar button.btn--copied {
+  background: #14532d;
+  border-color: #16a34a;
+  color: #86efac;
+}
+
+/* ─── Word Lists Toggle ──────────────────────────────────────────────────────── */
+
+.word-lists-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.word-lists-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: #a0a0a0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  padding: 4px 0;
+  transition: color 0.12s;
+}
+
+.word-lists-toggle:hover {
+  color: #eaeaea;
+}
+
+.word-lists-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: #4361ee;
+  color: #fff;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.word-lists-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.word-lists-add-btn {
+  background: transparent;
+  border: 1px solid #2a2a5a;
+  border-radius: 5px;
+  color: #7b9eff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.word-lists-add-btn:hover {
+  background: #1a1a3a;
+  border-color: #4361ee;
+}
+
+.word-lists-add-btn--block {
+  color: #fca5a5;
+  border-color: #3a1a1a;
+}
+
+.word-lists-add-btn--block:hover {
+  background: #2a1010;
+  border-color: #f87171;
 }
 
 .panes {
@@ -222,6 +409,71 @@ body {
 
 .pane textarea:read-only {
   cursor: default;
+}
+
+/* Input pane: subtle blue-left accent to signal it's editable */
+.pane--input {
+  border-left: 3px solid #4361ee44;
+  padding-left: 10px;
+}
+
+.pane--input textarea {
+  border-color: #2a2a6a;
+}
+
+.pane--input textarea:focus {
+  border-color: #4361ee;
+}
+
+/* Output pane: subtle green-left accent to signal read-only result */
+.pane--output {
+  border-left: 3px solid #22c55e44;
+  padding-left: 10px;
+}
+
+.pane--output .redacted-output-panel {
+  border-color: #1a3a2a;
+}
+
+/* Dim output while a scan is in progress */
+.pane--scanning .redacted-output-panel {
+  opacity: 0.4;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.pane--output:not(.pane--scanning) .redacted-output-panel {
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+.pane-hint {
+  margin-left: 8px;
+  font-size: 10px;
+  color: #4a4a6a;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Stale result badge */
+.stale-badge {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #f59e0b;
+  background: #f59e0b18;
+  border: 1px solid #f59e0b44;
+  border-radius: 4px;
+  padding: 1px 6px;
+  text-transform: none;
+  letter-spacing: 0;
+  animation: stale-pulse 2s ease-in-out infinite;
+}
+
+@keyframes stale-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
 }
 
 .stats {
@@ -648,6 +900,14 @@ body {
   font-size: 12px;
   color: #a0a0a0 !important;
   margin-top: 2px;
+}
+
+.context-menu-more {
+  font-size: 11px;
+  padding: 5px 4px;
+  text-align: center;
+  color: #7b9eff !important;
+  font-style: italic;
 }
 
 .context-menu-label {

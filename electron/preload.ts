@@ -29,7 +29,8 @@ export interface WordLists {
   blacklist: string[];
 }
 
-export type WordListMenu = 'whitelist' | 'blacklist';
+export type WordListMenu = 'allowlist' | 'blacklist';
+export type NerStatus = 'starting' | 'ready' | 'unavailable';
 
 contextBridge.exposeInMainWorld('pii', {
   scanText: (request: ScanRequest | string) => ipcRenderer.invoke('pii:scan', request),
@@ -57,5 +58,15 @@ contextBridge.exposeInMainWorld('pii', {
     };
     ipcRenderer.on('pii:open-word-editor', wrapped);
     return () => ipcRenderer.removeListener('pii:open-word-editor', wrapped);
+  },
+  saveRedacted: (text: string) =>
+    ipcRenderer.invoke('pii:save-file', text) as Promise<{ success: boolean; filePath?: string; reason?: string }>,
+  getNerStatus: () => ipcRenderer.invoke('pii:get-ner-status') as Promise<NerStatus>,
+  onNerStatus: (handler: (status: NerStatus) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, status: NerStatus) => {
+      handler(status);
+    };
+    ipcRenderer.on('pii:ner-status', wrapped);
+    return () => ipcRenderer.removeListener('pii:ner-status', wrapped);
   },
 });

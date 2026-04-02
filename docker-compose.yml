@@ -14,12 +14,4 @@ services:
       - PII_BERT_PY=/opt/pii-venv/bin/python3
       - PII_WEB_PORT=8787
       - PII_DEBUG=1
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
-
-
+      - DISPLAY=:99
