@@ -12,7 +12,7 @@ interface Match {
 
 const SOURCE_COLORS: Record<string, string> = {
   Regex: '#fde68a',
-  'Ner (Spacy)': '#a5f3fc',
+  'NER (Spacy)': '#a5f3fc',
   LLM: '#e9d5ff',
   Manual: '#fecaca',
   'Presidio': '#11f3fc',
@@ -24,6 +24,26 @@ const DEFAULT_SOURCE_COLOR = '#fed7aa';
 function sourceColor(source: string): string {
   return SOURCE_COLORS[source] ?? DEFAULT_SOURCE_COLOR;
 }
+
+const LAYER_ORDER = [
+  'Regex',
+  'NER (Spacy)',
+  'Spancat (Spacy)',
+  'Presidio (Analyzer)',
+  'NER (BERT)',
+  'LLM',
+] as const;
+
+const LAYER_TOOLTIPS: Record<string, string> = {
+  Regex: 'Pattern-based detector for structured PII (email, phone, IDs, IPs). Speed: Fast.',
+  'NER (Spacy)': 'spaCy NER for people, orgs, locations, dates, and times. Speed: Fast.',
+  'Spancat (Spacy)':
+    'spaCy SpanCategorizer for broader contextual PII span detection. Speed: Fast to moderate.',
+  'Presidio (Analyzer)':
+    'Presidio recognizers for policy-focused entities (PII/security-sensitive fields). Speed: Moderate.',
+  'NER (BERT)': 'Transformer-based NER for person/org/location extraction. Speed: Moderate.',
+  LLM: 'Contextual LLM pass to catch remaining nuanced PII after earlier masking. Speed: Much slower.',
+};
 
 interface ScanResult {
   redactedText: string;
@@ -793,7 +813,14 @@ function App() {
   }, [scannedInput]);
 
   const detectedTypes = [...new Set(matches.map((m) => m.type))];
-  const layerEntries = (Object.entries(layerState) as Array<[string, boolean]>).sort(([a], [b]) => a.localeCompare(b));
+  const layerEntries = (Object.entries(layerState) as Array<[string, boolean]>).sort(([a], [b]) => {
+    const aOrder = LAYER_ORDER.indexOf(a as (typeof LAYER_ORDER)[number]);
+    const bOrder = LAYER_ORDER.indexOf(b as (typeof LAYER_ORDER)[number]);
+    if (aOrder === -1 && bOrder === -1) return a.localeCompare(b);
+    if (aOrder === -1) return 1;
+    if (bOrder === -1) return -1;
+    return aOrder - bOrder;
+  });
 
   return (
     <div className="app">
@@ -986,7 +1013,7 @@ function App() {
           {layerEntries.length === 0 ? (
             <span style={{ fontSize: 12, color: '#a0a0a0' }}>Unavailable (backend not connected)</span>
           ) : layerEntries.map(([name, enabled]) => (
-            <label key={name} className="layer-toggle">
+            <label key={name} className="layer-toggle" title={LAYER_TOOLTIPS[name] ?? `${name} detector`}>
               <input type="checkbox" checked={enabled} onChange={(e) => handleLayerToggle(name, e.target.checked)} />
               <span style={{ background: sourceColor(name), borderRadius: 3, padding: '1px 6px', color: '#111', opacity: enabled ? 1 : 0.4 }}>
                 {name}
