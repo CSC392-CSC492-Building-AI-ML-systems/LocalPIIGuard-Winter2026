@@ -815,9 +815,11 @@ function App() {
         <button type="button" onClick={handleCopy} disabled={!redacted || isScanning} className={copied ? 'btn--copied' : ''}>
           {copied ? 'Copied ✓' : 'Copy Redacted'}
         </button>
-        <button type="button" onClick={handleSave} disabled={!redacted || isScanning}>
-          Save…
-        </button>
+        {window.pii?.saveRedacted && (
+          <button type="button" onClick={handleSave} disabled={!redacted || isScanning}>
+            Save…
+          </button>
+        )}
         <button type="button" onClick={handleClear} disabled={isScanning}>
           Clear
         </button>
