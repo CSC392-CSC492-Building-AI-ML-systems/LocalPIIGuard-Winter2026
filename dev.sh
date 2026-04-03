@@ -124,6 +124,5 @@ echo ""
 cd "$REPO_DIR"
 NODE_ENV=development \
 PII_NER_PY="$PYTHON" \
-PII_LLM_DEBUG=1 \
 PII_OLLAMA_BASE="$OLLAMA_BASE" \
-PII_DEBUG=1 npm run dev
+npm run dev
