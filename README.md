@@ -42,7 +42,7 @@ sudo apt install git-lfs
 git lfs pull
 ```
 
-## Manual Installation (No Docker)
+## Manual Installation (No Docker) (Legacy Instructions, not up to date) 
 
 ### Prerequisites
 
