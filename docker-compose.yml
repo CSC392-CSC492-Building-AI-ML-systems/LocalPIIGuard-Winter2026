@@ -13,5 +13,5 @@ services:
       - PII_SPACY_PY=/opt/pii-venv/bin/python3
       - PII_BERT_PY=/opt/pii-venv/bin/python3
       - PII_WEB_PORT=8787
-      - PII_DEBUG=1
+      - PII_DEBUG=0
       - DISPLAY=:99

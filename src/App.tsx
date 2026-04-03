@@ -13,10 +13,11 @@ interface Match {
 const SOURCE_COLORS: Record<string, string> = {
   Regex: '#fde68a',
   'NER (Spacy)': '#a5f3fc',
-  LLM: '#e9d5ff',
+  LLM: '#ddbeff',
   Manual: '#fecaca',
-  'Presidio': '#11f3fc',
-  
+  'Presidio (Analyzer)': '#80ffbf',
+  'NER (BERT)': '#ffa3eb',
+  'Spancat (Spacy)': '#9299ff',
 };
 
 const DEFAULT_SOURCE_COLOR = '#fed7aa';
