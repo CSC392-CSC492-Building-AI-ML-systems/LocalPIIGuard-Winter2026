@@ -30,6 +30,18 @@ When startup completes, open:
 ./run.sh down
 ```
 
+### Issues with the Spancat Model
+If you see the following error:
+```bash
+ [NER server] stderr: [ner_server] SpanCat load FAILED: Cannot load file containing pickled data when allow_pickle=False
+```
+Ensure that git-lfs is installed, and pull. 
+
+```bash
+sudo apt install git-lfs
+git lfs pull
+```
+
 ## Manual Installation (No Docker)
 
 ### Prerequisites
